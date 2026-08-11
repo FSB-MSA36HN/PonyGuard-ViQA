@@ -1,7 +1,7 @@
 extends: base.yaml
 system: ponyguard
 ponyguard:
-  policy_version: ask_only_missing_referent_or_attribute_v1
+  policy_version: evidence_first_contextual_ask_v3
   enable_requirement_analysis: true
   enable_evidence_check: true
   enable_inference_boundary: true

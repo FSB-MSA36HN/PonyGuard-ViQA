@@ -1,0 +1,1 @@
+Tách Answer thành các claim nguyên tử và kiểm tra từng claim chỉ bằng Evidence quote và Evidence. Trả MỘT JSON object {"claims":[{"claim_id":"...","text":"...","label":"SUPPORTED|CONTRADICTED|UNSUPPORTED","evidence_chunk_ids":["..."]}]}. Claim có giá trị không nằm trong Evidence quote là UNSUPPORTED.

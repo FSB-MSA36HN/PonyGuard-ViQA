@@ -22,8 +22,8 @@ def test_decision_gate():
     clear = Requirement(entity="x", requested_attribute="y", question_clear=True)
     assert PonyGuard.decide(Requirement(question_clear=False, missing_requirements=["entity"]), {}) == "ASK"
     assert PonyGuard.decide(clear, {"entity_match": True, "attribute_match": True, "evidence_sufficient": False}) == "ABSTAIN"
-    assert PonyGuard.decide(clear, {"entity_match": True, "attribute_match": True, "evidence_sufficient": True, "reasoning_allowed": True, "inference_level": "DIRECT"}) == "ANSWER"
-    assert PonyGuard.decide(clear, {"entity_match": True, "attribute_match": True, "evidence_sufficient": True, "reasoning_allowed": False, "inference_level": "UNSUPPORTED"}) == "ABSTAIN"
+    assert PonyGuard.decide(clear, {"entity_match": True, "attribute_match": True, "valid_supports": [{"chunk_id": "x"}], "reasoning_allowed": True, "inference_level": "DIRECT"}) == "ANSWER"
+    assert PonyGuard.decide(clear, {"entity_match": True, "attribute_match": True, "valid_supports": [{"chunk_id": "x"}], "reasoning_allowed": False, "inference_level": "UNSUPPORTED"}) == "ABSTAIN"
 
 def test_stable_hash_changes_with_ids():
     assert stable_hash(["a"]) != stable_hash(["b"])
@@ -36,6 +36,7 @@ def test_claim_final_gate_removes_unsupported_or_abstains():
     claims = [{"text": "Đúng.", "label": "SUPPORTED"}, {"text": "Sai.", "label": "UNSUPPORTED"}]
     assert PonyGuard.final_gate(claims, "Đúng. Sai.") == ("ANSWER", "Đúng.")
     assert PonyGuard.final_gate([{"text": "Sai.", "label": "CONTRADICTED"}], "Sai.")[0] == "ABSTAIN"
+    assert PonyGuard.final_gate([], "Không kiểm chứng được.")[0] == "ABSTAIN"
 
 def test_mock_requirement_analyzer_detects_missing_entity():
     value, _ = LocalLLM("mock", backend="mock").json("question_clear\nQuestion: Ông ấy sinh năm bao nhiêu?")
@@ -56,7 +57,7 @@ def test_clear_question_overrides_bad_llm_clarity_and_answers_with_direct_eviden
     question = "Việt Nam có bao nhiêu loài thực vật?"
     bad_llm_requirement = Requirement(question_clear=False, missing_requirements=["entity"], clarification_question='Có phải bạn đang muốn hỏi "Việt Nam có bao nhiêu loài thực vật?"?')
     requirement = PonyGuard.apply_clarity_guard(question, bad_llm_requirement)
-    evidence = {"entity_match": True, "attribute_match": True, "evidence_sufficient": True, "answerable_from_evidence": True, "conflict_detected": False, "inference_level": "DIRECT", "reasoning_allowed": True, "supporting_chunk_ids": ["doc_003879_chunk_000001"], "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật."}
+    evidence = {"entity_match": True, "attribute_match": True, "valid_supports": [{"chunk_id": "doc_003879_chunk_000001"}], "conflict_detected": False, "inference_level": "DIRECT", "reasoning_allowed": True, "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật."}
     assert requirement.question_clear and not requirement.missing_requirements
     assert PonyGuard.decide(requirement, evidence) == "ANSWER"
     assert "15.986" in PonyGuard.decision_rationale(requirement, evidence, "ANSWER")
@@ -89,7 +90,8 @@ def test_vietnam_plants_regression_answers_despite_bad_requirement_label():
     class LLMStub:
         def __init__(self): self.outputs = iter([
             {"entity": None, "requested_attribute": "số loài thực vật", "question_clear": False, "missing_requirements": ["entity"], "clarification_question": 'Có phải bạn đang muốn hỏi "Việt Nam có bao nhiêu loài thực vật?"?'},
-            {"entity_match": True, "attribute_match": True, "evidence_found": True, "evidence_sufficient": True, "answerable_from_evidence": True, "conflict_detected": False, "supporting_chunk_ids": ["doc_003879_chunk_000001"], "inference_level": "DIRECT", "reasoning_allowed": True, "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật."},
+            {"entity_match": True, "attribute_match": True, "conflict_detected": False, "inference_level": "DIRECT", "reasoning_allowed": True, "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật.", "support": [{"chunk_id": "doc_003879_chunk_000001", "evidence_quote": "Việt Nam có 15.986 loài thực vật.", "candidate_answer": "15.986 loài thực vật", "support_type": "DIRECT"}]},
+            {"answer": "15.986 loài thực vật", "citation_chunk_ids": ["doc_003879_chunk_000001"], "evidence_quote": "Việt Nam có 15.986 loài thực vật."},
             {"claims": [{"claim_id": "c1", "text": "Việt Nam có 15.986 loài thực vật.", "label": "SUPPORTED", "evidence_chunk_ids": ["doc_003879_chunk_000001"]}]},
         ])
         def json(self, *_): return next(self.outputs), LLMResponse("{}", 1, 1, 1)
@@ -102,5 +104,12 @@ def test_json_parser_handles_fenced_json_and_repairs_malformed_output():
     assert LocalLLM._extract_json("```json\n{\"ok\": true}\n```") == {"ok": True}
     llm = LocalLLM("mock", backend="mock")
     outputs = iter(["{\"broken\": true", "{\"repaired\": true}"])
-    llm.generate = lambda _: LLMResponse(next(outputs), 1, 1, 1)  # type: ignore[method-assign]
-    assert llm.json("anything")[0] == {"repaired": True}
+    llm.generate = lambda *_: LLMResponse(next(outputs), 1, 1, 1)  # type: ignore[method-assign]
+    value, response = llm.json("anything")
+    assert value == {"repaired": True} and response.calls == 2
+
+def test_json_parser_fails_closed_after_two_malformed_outputs():
+    llm = LocalLLM("mock", backend="mock")
+    llm.generate = lambda *_: LLMResponse("{broken", 1, 1, 1)  # type: ignore[method-assign]
+    value, response = llm.json("anything", 80)
+    assert value == {"_parse_error": True} and response.calls == 2

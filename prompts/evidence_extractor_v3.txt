@@ -1,0 +1,3 @@
+Đối chiếu Requirement với retrieved chunks. Trả MỘT JSON object gồm entity_match, attribute_match, conflict_detected, inference_level (DIRECT/SIMPLE_INFERENCE/UNSUPPORTED), reasoning_allowed, decision_rationale, và support.
+
+support là mảng các object {chunk_id, evidence_quote, candidate_answer, support_type}. evidence_quote phải là đoạn nguyên văn liên tiếp của chunk_id. candidate_answer phải là giá trị có trong quote. support_type chỉ DIRECT hoặc SIMPLE_INFERENCE. Không có evidence thì support là []. Không coi similarity là evidence. decision_rationale viết ngắn bằng tiếng Việt.

@@ -33,6 +33,26 @@ def normalize_text(value: str) -> str:
     return " ".join(value.replace("\r\n", "\n").replace("\n", " ").split())
 
 
+def normalized_contains(text: str, part: str) -> bool:
+    """Whitespace/case-insensitive literal evidence check."""
+    return normalize_text(part).casefold() in normalize_text(text).casefold()
+
+
+def answer_matches_quote(answer: str, quote: str) -> bool:
+    """Reject a generated value when its numbers/dates/names are absent from its quote."""
+    answer, quote = normalize_text(answer), normalize_text(quote)
+    if not answer or not quote:
+        return False
+    if normalized_contains(quote, answer):
+        return True
+    numbers = re.findall(r"\d+(?:[.,]\d+)*", answer)
+    if numbers:
+        quote_numbers = {value.replace(",", ".") for value in re.findall(r"\d+(?:[.,]\d+)*", quote)}
+        return all(value.replace(",", ".") in quote_numbers for value in numbers)
+    words = [word for word in tokenise(answer) if len(word) >= 3 and word not in {"các", "được", "trong", "theo", "với", "của", "cho", "là"}]
+    return bool(words) and all(word in tokenise(quote) for word in words)
+
+
 def add_clarification(question: str, clarification: str) -> str:
     """Clarification defines the request; it is never injected as retrieved evidence."""
     return f"{normalize_text(question)}\n\nThông tin làm rõ từ người dùng: {normalize_text(clarification)}"
@@ -40,11 +60,16 @@ def add_clarification(question: str, clarification: str) -> str:
 
 def missing_requirements_from_question(question: str) -> list[str]:
     """Only genuine underspecification is eligible for ASK; LLM labels cannot add it."""
+    return question_ambiguity(question)[0]
+
+
+def question_ambiguity(question: str) -> tuple[list[str], str]:
+    """Deterministic ASK eligibility; a model may not invent ambiguity."""
     text = normalize_text(question).lower()
-    if "thông tin làm rõ từ người dùng:" in text: return []
-    if re.search(r"\b(ông ấy|bà ấy|người này|người đó|người kia|nó|họ)\b", text): return ["entity"]
-    if re.search(r"\bcó bao nhiêu\s*[?!.]*$", text): return ["requested_attribute"]
-    return []
+    if "thông tin làm rõ từ người dùng:" in text: return [], "NONE"
+    if re.search(r"\b(ông ấy|bà ấy|người này|người đó|người kia|nó|họ)\b", text): return ["entity"], "MISSING_ENTITY"
+    if re.search(r"\b(?:có\s+)?(?:bao\s+nhiêu|mấy)(?:\s+(?:cái|người))?\s*[?!.]*$", text): return ["requested_attribute"], "AMBIGUOUS_ATTRIBUTE"
+    return [], "NONE"
 
 
 def tokenise(value: str) -> list[str]:
@@ -81,6 +106,8 @@ class Requirement:
     question_clear: bool = True
     missing_requirements: list[str] = field(default_factory=list)
     clarification_question: str = ""
+    ambiguity_type: str = "NONE"
+    clarification_options: list[str] = field(default_factory=list)
 
 
 @dataclass

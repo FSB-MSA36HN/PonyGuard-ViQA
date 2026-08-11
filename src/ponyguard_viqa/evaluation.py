@@ -25,7 +25,8 @@ def audit_claims(prediction: dict[str, Any], llm: LocalLLM) -> list[dict[str, An
     # The offline audit gets the identical retrieved evidence text from a stored optional trace when available.
     if prediction.get("trace", {}).get("retrieval", {}).get("chunks"):
         chunks = [Chunk(**item) for item in prediction["trace"]["retrieval"]["chunks"]]
-    parsed, _ = llm.json(f"{prompt('claim_verifier_v1.txt')}\nAnswer: {prediction['prediction']['answer']}\nEvidence:\n{context(chunks)}")
+    quote = prediction["prediction"].get("grounding", {}).get("evidence_quote", "")
+    parsed, _ = llm.json(f"{prompt('claim_verifier_v2.txt')}\nAnswer: {prediction['prediction']['answer']}\nEvidence quote: {quote}\nEvidence:\n{context(chunks)}")
     return parsed.get("claims", [])
 
 
@@ -36,6 +37,7 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
     asks = [row for row in predictions if row["prediction"]["decision"] == "ASK"]
     clear_samples = [row for row in predictions if row["gold"]["expected_action"] != "ASK"]
     expected_asks = [row for row in predictions if row["gold"]["expected_action"] == "ASK"]
+    ambiguous = [row for row in predictions if row.get("trace", {}).get("requirements", {}).get("ambiguity_type") == "AMBIGUOUS_ATTRIBUTE"]
     correct_actions = sum(row["prediction"]["decision"] == row["gold"]["expected_action"] for row in predictions)
     tp = sum(row["gold"]["expected_action"] == "ABSTAIN" and row["prediction"]["decision"] == "ABSTAIN" for row in predictions)
     fp = sum(row["gold"]["expected_action"] == "ANSWER" and row["prediction"]["decision"] == "ABSTAIN" for row in predictions)
@@ -44,6 +46,11 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
     answer_f1 = [max((f1(row["prediction"]["answer"], answer) for answer in row["gold"]["answers"]), default=0.0) for row in answerable if row["prediction"]["decision"] == "ANSWER"]
     claims = [claim for row in predictions for claim in row.get("audit_claims", row.get("trace", {}).get("claims", []))]
     unsupported = [claim for claim in claims if claim.get("label") in ("UNSUPPORTED", "CONTRADICTED")]
+    grounded = [row for row in answered if row["prediction"].get("grounding", {}).get("valid")]
+    cited = [row for row in answered if row["prediction"].get("grounding", {}).get("citation_chunk_ids")]
+    numeric_answers = [row for row in answered if any(char.isdigit() for char in row["prediction"]["answer"])]
+    unsupported_numeric = [row for row in numeric_answers if not row["prediction"].get("grounding", {}).get("valid")]
+    direct = [row for row in predictions if row.get("trace", {}).get("evidence", {}).get("valid_supports")]
     return {
         "count": len(predictions), "answer_em": sum(any(row["prediction"]["answer"].strip().lower() == answer.strip().lower() for answer in row["gold"]["answers"]) for row in answerable if row["prediction"]["decision"] == "ANSWER") / max(1, len(answerable)),
         "answer_f1": sum(answer_f1) / max(1, len(answerable)), "action_accuracy": correct_actions / max(1, len(predictions)),
@@ -53,8 +60,13 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
         "false_ask_rate": sum(row["prediction"]["decision"] == "ASK" for row in clear_samples) / max(1, len(clear_samples)),
         "meaningful_ask_rate": sum(row["gold"]["expected_action"] == "ASK" for row in asks) / max(1, len(asks)),
         "ask_recall": sum(row["prediction"]["decision"] == "ASK" for row in expected_asks) / max(1, len(expected_asks)),
+        "contextual_clarification_rate": sum(row["prediction"]["decision"] == "ASK" and len(row.get("trace", {}).get("requirements", {}).get("clarification_options", [])) >= 2 for row in ambiguous) / max(1, len(ambiguous)),
         "unsupported_claim_rate": len(unsupported) / max(1, len(claims)),
         "hallucinated_answer_rate": sum(any(c.get("label") in ("UNSUPPORTED", "CONTRADICTED") for c in row.get("audit_claims", row.get("trace", {}).get("claims", []))) for row in answered) / max(1, len(answered)),
+        "grounding_validity_rate": len(grounded) / max(1, len(answered)),
+        "citation_coverage": len(cited) / max(1, len(answered)),
+        "unsupported_numeric_answer_rate": len(unsupported_numeric) / max(1, len(numeric_answers)),
+        "false_abstain_on_direct_evidence": sum(row["prediction"]["decision"] != "ANSWER" for row in direct) / max(1, len(direct)),
         "mean_latency_ms": statistics.mean([row["performance"]["latency_ms"] for row in predictions]) if predictions else 0,
         "p50_latency_ms": statistics.median([row["performance"]["latency_ms"] for row in predictions]) if predictions else 0,
         "p95_latency_ms": sorted([row["performance"]["latency_ms"] for row in predictions])[max(0, int(len(predictions) * .95) - 1)] if predictions else 0,
@@ -66,7 +78,7 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def markdown_table(results: dict[str, dict[str, Any]]) -> str:
-    keys = ["answer_em", "answer_f1", "unanswerable_f1", "hallucinated_answer_rate", "unsupported_claim_rate", "over_abstention_rate", "false_ask_rate", "meaningful_ask_rate", "mean_latency_ms", "mean_llm_calls"]
+    keys = ["answer_em", "answer_f1", "unanswerable_f1", "hallucinated_answer_rate", "unsupported_claim_rate", "grounding_validity_rate", "citation_coverage", "unsupported_numeric_answer_rate", "false_abstain_on_direct_evidence", "over_abstention_rate", "false_ask_rate", "meaningful_ask_rate", "contextual_clarification_rate", "mean_latency_ms", "mean_llm_calls"]
     headers = " | ".join(["Metric", *results]); lines = [f"| {headers} |", "|" + "---|"*(len(results)+1)]
     for key in keys: lines.append("| " + " | ".join([key, *(f"{result[key]:.4f}" for result in results.values())]) + " |")
     return "\n".join(lines)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from time import perf_counter
 from pathlib import Path
 from typing import Any
 
@@ -39,14 +40,20 @@ class Retriever:
         self.index = None
         self.documents = [json.loads(line) for line in Path(documents_path).open(encoding="utf-8") if line.strip()]
         self.embedder = embedder
+        self.last_timing: dict[str, float] = {}
 
     def retrieve(self, question: str, top_k: int = 5) -> list[Chunk]:
+        started = perf_counter()
         vector = self.embedder.encode([question], query=True)
+        embedded = perf_counter()
         # Import FAISS after Torch/SentenceTransformers on macOS to avoid their OpenMP loader conflict.
         if self.index is None:
             import faiss
             self.index = faiss.read_index(self.index_path)
+        loaded = perf_counter()
         scores, ids = self.index.search(vector, top_k)
+        finished = perf_counter()
+        self.last_timing = {"embedding_ms": round((embedded-started)*1000, 2), "index_load_ms": round((loaded-embedded)*1000, 2), "faiss_search_ms": round((finished-loaded)*1000, 2), "total_ms": round((finished-started)*1000, 2)}
         return [Chunk(document_id=self.documents[index]["document_id"], chunk_id=self.documents[index]["chunk_id"], text=self.documents[index]["text"], score=float(score)) for score, index in zip(scores[0], ids[0]) if index >= 0]
 
 
