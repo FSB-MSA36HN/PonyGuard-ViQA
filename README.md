@@ -31,6 +31,8 @@ make benchmark
 
 # 6. Launch the demo
 make demo
+# Or run everything needed, then open the demo
+./run.sh
 ```
 
 Useful checks:

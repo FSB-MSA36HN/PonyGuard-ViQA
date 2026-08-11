@@ -18,6 +18,6 @@ benchmark:
 test:
 	.venv/bin/python -m pytest -q
 demo:
-	.venv/bin/streamlit run src/ui/app.py
+	.venv/bin/streamlit run src/ui/app.py --server.fileWatcherType none
 help:
 	@echo "make setup | dataset | verify-data | prepare-data | build-index | evaluate-retrieval | benchmark | test | demo"
