@@ -1,0 +1,2 @@
+extends: base.yaml
+system: prompt_safe_rag

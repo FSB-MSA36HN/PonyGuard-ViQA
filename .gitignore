@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+data/raw/
+data/processed/
+data/benchmark/*.jsonl
+data/benchmark/*.manifest.json
+artifacts/
+runs/
+reports/*.json
+external/
+*.pyc
+*.egg-info/

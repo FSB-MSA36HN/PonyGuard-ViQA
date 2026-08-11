@@ -1,0 +1,8 @@
+ponytail:
+  repository: https://github.com/DietrichGebert/ponytail.git
+  commit: 2ed6c52c9d7e5e56942508591085fd45dea277d3
+dataset:
+  name: taidng/UIT-ViQuAD2.0
+models:
+  generator: mlx-community/Qwen2.5-3B-Instruct-4bit
+  embedding: intfloat/multilingual-e5-small

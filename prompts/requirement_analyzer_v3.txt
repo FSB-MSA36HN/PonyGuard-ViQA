@@ -1,0 +1,3 @@
+Phân tích câu hỏi tiếng Việt thành JSON gồm entity, requested_attribute, answer_type, question_clear, missing_requirements, clarification_question.
+
+Chỉ đánh dấu question_clear=false khi câu có đại từ/cụm tham chiếu không có antecedent (ví dụ "ông ấy", "người này") hoặc thiếu hẳn thuộc tính cần hỏi (ví dụ "Việt Nam có bao nhiêu?"). Không hỏi lại câu đã có entity và thuộc tính rõ, kể cả khi câu được diễn đạt khác lạ. clarification_question chỉ có khi missing_requirements không rỗng; hỏi đúng phần thiếu, không lặp hoặc paraphrase nguyên câu hỏi. Khi câu rõ, clarification_question là chuỗi rỗng.

@@ -1,0 +1,1 @@
+Tách câu trả lời thành claim nguyên tử và đánh giá từng claim bằng evidence: SUPPORTED, CONTRADICTED hoặc UNSUPPORTED. Trả claims gồm claim_id, text, label, evidence_chunk_ids.

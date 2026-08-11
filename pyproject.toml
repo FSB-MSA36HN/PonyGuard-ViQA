@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ponyguard-viqa"
+version = "0.1.0"
+description = "Requirement-aware evidence harness for Vietnamese RAG"
+requires-python = ">=3.10"
+dependencies = [
+  "datasets>=3.0", "faiss-cpu>=1.8", "numpy>=1.26", "pydantic>=2.0",
+  "PyYAML>=6.0", "sentence-transformers>=3.0", "streamlit>=1.38",
+  "tqdm>=4.66", "mlx-lm>=0.18; platform_system == 'Darwin'",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

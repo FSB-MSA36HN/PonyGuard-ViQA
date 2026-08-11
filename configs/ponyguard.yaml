@@ -1,0 +1,8 @@
+extends: base.yaml
+system: ponyguard
+ponyguard:
+  policy_version: ask_only_missing_referent_or_attribute_v1
+  enable_requirement_analysis: true
+  enable_evidence_check: true
+  enable_inference_boundary: true
+  enable_claim_verification: true
