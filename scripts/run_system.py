@@ -20,7 +20,7 @@ def main():
     output = args.output or f"runs/{args.system}/{Path(args.input).stem}_predictions.jsonl"
     predictions = [pipeline.run(row) for row in rows]
     write_jsonl(output, predictions)
-    metadata = {"config": config, "sample_ids_sha256": stable_hash([row["sample_id"] for row in rows]), "prompt_versions": ["basic_rag_v3", "prompt_safe_rag_v3", "requirement_analyzer_v4", "evidence_extractor_v3", "claim_verifier_v2"], "policy_version": config.get("ponyguard", {}).get("policy_version", "grounded_baseline_v1"), "grounding_validator": "literal_quote_value_v1", "index": json.loads(Path("artifacts/index/metadata.json").read_text())}
+    metadata = {"config": config, "sample_ids_sha256": stable_hash([row["sample_id"] for row in rows]), "prompt_versions": ["basic_rag_v3", "prompt_safe_rag_v3", "requirement_analyzer_v5", "evidence_scope_auditor_v1", "claim_verifier_v2"], "policy_version": config.get("ponyguard", {}).get("policy_version", "grounded_baseline_v1"), "grounding_validator": "literal_quote_value_v1", "index": json.loads(Path("artifacts/index/metadata.json").read_text())}
     Path(output).with_suffix(".metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
     print(output)
 

@@ -72,6 +72,18 @@ def question_ambiguity(question: str) -> tuple[list[str], str]:
     return [], "NONE"
 
 
+def question_scope(question: str) -> tuple[str, str, list[str]]:
+    """Deterministic constraints that a retrieved fact must satisfy."""
+    text = normalize_text(question).lower()
+    year = re.search(r"\bnăm\s+(19|20)\d{2}\b", text)
+    time_scope = year.group() if year else ("CURRENT" if re.search(r"\b(hiện nay|hiện tại|bây giờ)\b", text) else "UNSPECIFIED")
+    population_scope = "ALL" if re.search(r"\b(tất cả|toàn bộ|mọi)\b", text) else "UNSPECIFIED"
+    constraints = []
+    if time_scope != "UNSPECIFIED": constraints.append(time_scope)
+    if population_scope == "ALL": constraints.append("all requested categories")
+    return time_scope, population_scope, constraints
+
+
 def tokenise(value: str) -> list[str]:
     return re.findall(r"\w+", normalize_text(value).lower(), flags=re.UNICODE)
 
@@ -108,6 +120,9 @@ class Requirement:
     clarification_question: str = ""
     ambiguity_type: str = "NONE"
     clarification_options: list[str] = field(default_factory=list)
+    population_scope: str = "UNSPECIFIED"
+    time_scope: str = "UNSPECIFIED"
+    inclusion_constraints: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -117,6 +132,7 @@ class PonyGuardState:
     requirements: dict[str, Any] = field(default_factory=dict)
     retrieval: dict[str, Any] = field(default_factory=dict)
     evidence: dict[str, Any] = field(default_factory=dict)
+    coverage: dict[str, Any] = field(default_factory=dict)
     reasoning: dict[str, Any] = field(default_factory=dict)
     decision: Action | None = None
     decision_reason: str = ""

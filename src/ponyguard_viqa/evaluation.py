@@ -38,6 +38,8 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
     clear_samples = [row for row in predictions if row["gold"]["expected_action"] != "ASK"]
     expected_asks = [row for row in predictions if row["gold"]["expected_action"] == "ASK"]
     ambiguous = [row for row in predictions if row.get("trace", {}).get("requirements", {}).get("ambiguity_type") == "AMBIGUOUS_ATTRIBUTE"]
+    scoped = [row for row in predictions if row.get("trace", {}).get("requirements", {}).get("time_scope", "UNSPECIFIED") != "UNSPECIFIED" or row.get("trace", {}).get("requirements", {}).get("population_scope", "UNSPECIFIED") != "UNSPECIFIED"]
+    refusals = [row for row in predictions if row["prediction"]["decision"] == "ABSTAIN"]
     correct_actions = sum(row["prediction"]["decision"] == row["gold"]["expected_action"] for row in predictions)
     tp = sum(row["gold"]["expected_action"] == "ABSTAIN" and row["prediction"]["decision"] == "ABSTAIN" for row in predictions)
     fp = sum(row["gold"]["expected_action"] == "ANSWER" and row["prediction"]["decision"] == "ABSTAIN" for row in predictions)
@@ -61,6 +63,10 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
         "meaningful_ask_rate": sum(row["gold"]["expected_action"] == "ASK" for row in asks) / max(1, len(asks)),
         "ask_recall": sum(row["prediction"]["decision"] == "ASK" for row in expected_asks) / max(1, len(expected_asks)),
         "contextual_clarification_rate": sum(row["prediction"]["decision"] == "ASK" and len(row.get("trace", {}).get("requirements", {}).get("clarification_options", [])) >= 2 for row in ambiguous) / max(1, len(ambiguous)),
+        "scope_match_rate": sum(row["prediction"]["decision"] != "ANSWER" or bool(row["trace"]["evidence"].get("valid_supports")) for row in scoped) / max(1, len(scoped)),
+        "grounded_refusal_rate": sum(bool(row.get("trace", {}).get("coverage", {}).get("supported_facts")) for row in refusals) / max(1, len(refusals)),
+        "explanation_grounding_rate": sum(bool(row.get("trace", {}).get("coverage", {}).get("coverage_gaps")) for row in refusals) / max(1, len(refusals)),
+        "mean_coverage_probes": statistics.mean([len(row.get("trace", {}).get("coverage", {}).get("probe_queries", [])) for row in predictions]) if predictions else 0,
         "unsupported_claim_rate": len(unsupported) / max(1, len(claims)),
         "hallucinated_answer_rate": sum(any(c.get("label") in ("UNSUPPORTED", "CONTRADICTED") for c in row.get("audit_claims", row.get("trace", {}).get("claims", []))) for row in answered) / max(1, len(answered)),
         "grounding_validity_rate": len(grounded) / max(1, len(answered)),
@@ -78,7 +84,7 @@ def metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def markdown_table(results: dict[str, dict[str, Any]]) -> str:
-    keys = ["answer_em", "answer_f1", "unanswerable_f1", "hallucinated_answer_rate", "unsupported_claim_rate", "grounding_validity_rate", "citation_coverage", "unsupported_numeric_answer_rate", "false_abstain_on_direct_evidence", "over_abstention_rate", "false_ask_rate", "meaningful_ask_rate", "contextual_clarification_rate", "mean_latency_ms", "mean_llm_calls"]
+    keys = ["answer_em", "answer_f1", "unanswerable_f1", "hallucinated_answer_rate", "unsupported_claim_rate", "grounding_validity_rate", "citation_coverage", "scope_match_rate", "grounded_refusal_rate", "explanation_grounding_rate", "mean_coverage_probes", "unsupported_numeric_answer_rate", "false_abstain_on_direct_evidence", "over_abstention_rate", "false_ask_rate", "meaningful_ask_rate", "contextual_clarification_rate", "mean_latency_ms", "mean_llm_calls"]
     headers = " | ".join(["Metric", *results]); lines = [f"| {headers} |", "|" + "---|"*(len(results)+1)]
     for key in keys: lines.append("| " + " | ".join([key, *(f"{result[key]:.4f}" for result in results.values())]) + " |")
     return "\n".join(lines)

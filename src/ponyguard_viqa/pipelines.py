@@ -6,7 +6,7 @@ from time import perf_counter
 from pathlib import Path
 from typing import Any
 
-from .core import Action, Chunk, PonyGuardState, Requirement, answer_matches_quote, missing_requirements_from_question, normalized_contains, normalize_text, question_ambiguity
+from .core import Action, Chunk, PonyGuardState, Requirement, answer_matches_quote, missing_requirements_from_question, normalized_contains, normalize_text, question_ambiguity, question_scope
 from .llm import LocalLLM
 from .retrieval import Retriever
 
@@ -103,8 +103,14 @@ class PonyGuard:
     def decide(requirement: Requirement, evidence: dict[str, Any]) -> Action:
         if requirement.missing_requirements: return "ASK"
         if not all((evidence.get("entity_match"), evidence.get("attribute_match"), evidence.get("valid_supports"))) or evidence.get("conflict_detected"): return "ABSTAIN"
+        if not PonyGuard.scope_matches(requirement, evidence.get("valid_supports", [])): return "ABSTAIN"
         if not evidence.get("reasoning_allowed") or evidence.get("inference_level") == "UNSUPPORTED": return "ABSTAIN"
         return "ANSWER"
+
+    @staticmethod
+    def scope_matches(requirement: Requirement, supports: list[dict[str, Any]]) -> bool:
+        if requirement.time_scope == "UNSPECIFIED" and requirement.population_scope == "UNSPECIFIED": return True
+        return any((requirement.time_scope == "UNSPECIFIED" or item.get("matches_time") is True) and (requirement.population_scope == "UNSPECIFIED" or item.get("matches_population") is True) for item in supports)
 
     @staticmethod
     def apply_clarity_guard(question: str, requirement: Requirement) -> Requirement:
@@ -113,6 +119,7 @@ class PonyGuard:
         requirement.missing_requirements = missing
         requirement.question_clear = not missing
         requirement.ambiguity_type = ambiguity
+        requirement.time_scope, requirement.population_scope, requirement.inclusion_constraints = question_scope(question)
         if ambiguity == "AMBIGUOUS_ATTRIBUTE" and not requirement.entity:
             match = re.search(r"^(?:hiện tại\s+)?(.+?)\s+(?:có\s+)?(?:bao\s+nhiêu|mấy)(?:\s+(?:cái|người))?\s*[?!.]*$", normalize_text(question), re.I)
             if match: requirement.entity = match.group(1).strip()
@@ -132,10 +139,18 @@ class PonyGuard:
         return value
 
     @staticmethod
+    def text_items(value: Any) -> list[str]:
+        """LLMs sometimes return one string where the schema requests a list."""
+        values = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+        return [normalize_text(str(item)) for item in values if normalize_text(str(item))]
+
+    @staticmethod
     def decision_rationale(requirement: Requirement, evidence: dict[str, Any], decision: Action) -> str:
         if decision == "ASK": return f"Thiếu thông tin bắt buộc: {', '.join(requirement.missing_requirements)}."
         if decision == "ANSWER": return str(evidence.get("decision_rationale") or "Evidence đáp ứng entity, thuộc tính và mức suy luận cho phép.")
         if evidence.get("conflict_detected"): return "Các chunks có evidence mâu thuẫn."
+        gaps = PonyGuard.text_items(evidence.get("coverage_gaps"))
+        if gaps: return str(gaps[0])
         missing = evidence.get("missing_evidence") or []
         return str(evidence.get("decision_rationale") or (f"Evidence chưa đủ: {', '.join(missing)}." if missing else "Retrieved evidence chưa đủ để trả lời an toàn."))
 
@@ -161,9 +176,38 @@ class PonyGuard:
             return f"Bạn muốn biết thuộc tính hoặc thông tin nào về {requirement.entity or 'đối tượng đó'}?"
         return "Bạn có thể làm rõ chính xác thông tin cần hỏi không?"
 
+    @staticmethod
+    def coverage_probe_queries(requirement: Requirement, question: str) -> list[str]:
+        base = " ".join(part for part in (requirement.entity, requirement.requested_attribute) if part) or question
+        probes = []
+        if requirement.population_scope == "ALL": probes.append(f"{base} tổng số toàn bộ")
+        if requirement.time_scope != "UNSPECIFIED": probes.append(f"{base} hiện nay" if requirement.time_scope == "CURRENT" else f"{base} {requirement.time_scope}")
+        return list(dict.fromkeys(probes))[:2]
+
+    @staticmethod
+    def grounded_refusal(requirement: Requirement, evidence: dict[str, Any]) -> dict[str, Any]:
+        supports = evidence.get("valid_supports", [])
+        facts = [{"chunk_id": item["chunk_id"], "text": item["evidence_quote"]} for item in supports[:2]]
+        gaps = PonyGuard.text_items(evidence.get("coverage_gaps"))
+        for item in supports:
+            for reason in PonyGuard.text_items(item.get("mismatch_reasons")):
+                if reason not in gaps: gaps.append(str(reason))
+        if requirement.time_scope != "UNSPECIFIED" and not any(item.get("matches_time") is True for item in supports):
+            gaps.append("Thời gian trong evidence không khớp thời gian được hỏi.")
+        if requirement.population_scope != "UNSPECIFIED" and not any(item.get("matches_population") is True for item in supports):
+            gaps.append("Evidence không xác nhận toàn bộ phạm vi/nhóm đối tượng được hỏi.")
+        gaps = list(dict.fromkeys(gaps)) or ["Không có evidence đã kiểm chứng bao phủ đầy đủ yêu cầu."]
+        partial = supports[0].get("candidate_answer") if supports else ""
+        rephrase = f"Nếu bạn muốn phạm vi hẹp hơn mà tài liệu nêu, có thể hỏi về {partial}." if partial else "Bạn có thể nêu phạm vi hoặc mốc thời gian hẹp hơn nếu phù hợp."
+        lines = ["Tôi chưa thể xác nhận câu trả lời cho đúng phạm vi bạn hỏi."]
+        if facts: lines.append("Tài liệu xác nhận: " + " ".join(f"“{item['text']}” [{item['chunk_id']}]" for item in facts))
+        lines.append("Vì chưa đủ: " + " ".join(gaps))
+        lines.append(rephrase)
+        return {"reason_summary": gaps[0], "supported_facts": facts, "coverage_gaps": gaps, "safe_rephrase": rephrase, "text": "\n\n".join(lines)}
+
     def run(self, sample: dict[str, Any]) -> dict[str, Any]:
         state = PonyGuardState(sample.get("sample_id"), sample["question"]); stats = []; timings: dict[str, Any] = {}
-        req_json, response = _timed_json(self.llm, "requirement", f"{prompt('requirement_analyzer_v4.txt')}\nQuestion: {sample['question']}", self.stage_tokens["requirement"], timings); stats.append(response)
+        req_json, response = _timed_json(self.llm, "requirement", f"{prompt('requirement_analyzer_v5.txt')}\nQuestion: {sample['question']}", self.stage_tokens["requirement"], timings); stats.append(response)
         requirement = Requirement(**{key: req_json.get(key) for key in Requirement.__dataclass_fields__ if key in req_json})
         requirement = self.apply_clarity_guard(sample["question"], requirement)
         state.requirements = requirement.__dict__
@@ -174,18 +218,32 @@ class PonyGuard:
             state.metrics = {"llm_calls": sum(item.calls for item in stats)}
             return _prediction(sample, "ponyguard", decision, answer, [], stats, state.to_dict(), reason, timings=timings)
         chunks = self.retriever.retrieve(sample["question"], self.top_k); timings["retrieval"] = getattr(self.retriever, "last_timing", {}); state.retrieval = {"chunks": [c.to_dict() for c in chunks]}
-        evidence_json, response = _timed_json(self.llm, "evidence", f"{prompt('evidence_extractor_v3.txt')}\nRequirement: {json.dumps(state.requirements, ensure_ascii=False)}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
+        evidence_json, response = _timed_json(self.llm, "evidence", f"{prompt('evidence_scope_auditor_v1.txt')}\nRequirement: {json.dumps(state.requirements, ensure_ascii=False)}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
         supports, rejected = self.validated_supports(evidence_json, chunks)
         evidence_json["valid_supports"] = supports
         evidence_json["support_rejections"] = rejected
         evidence_json["answerable_from_evidence"] = bool(supports)
         evidence_json["evidence_sufficient"] = bool(supports)
+        if supports and not self.scope_matches(requirement, supports):
+            probes = self.coverage_probe_queries(requirement, sample["question"])
+            probe_chunks = [chunk for query in probes for chunk in self.retriever.retrieve(query, min(2, self.top_k))]
+            seen = {chunk.chunk_id for chunk in chunks}
+            for chunk in probe_chunks:
+                if chunk.chunk_id not in seen:
+                    chunks.append(chunk); seen.add(chunk.chunk_id)
+            state.coverage = {"probe_queries": probes, "probe_chunk_ids": [chunk.chunk_id for chunk in probe_chunks]}
+            state.retrieval = {"chunks": [chunk.to_dict() for chunk in chunks]}
+            evidence_json, response = _timed_json(self.llm, "scope_reaudit", f"{prompt('evidence_scope_auditor_v1.txt')}\nRequirement: {json.dumps(state.requirements, ensure_ascii=False)}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
+            supports, rejected = self.validated_supports(evidence_json, chunks)
+            evidence_json["valid_supports"], evidence_json["support_rejections"], evidence_json["answerable_from_evidence"], evidence_json["evidence_sufficient"] = supports, rejected, bool(supports), bool(supports)
         state.evidence = evidence_json; state.reasoning = {"level": evidence_json.get("inference_level"), "allowed": evidence_json.get("reasoning_allowed")}
         decision = self.decide(requirement, evidence_json) if self.enabled["requirement"] and self.enabled["inference"] else ("ANSWER" if evidence_json.get("evidence_sufficient") else "ABSTAIN")
         reason = self.decision_rationale(requirement, evidence_json, decision)
         state.decision, state.decision_reason = decision, reason
         if decision != "ANSWER":
-            answer = self.clarification_question(requirement, sample["question"]) if decision == "ASK" else "Tài liệu hiện có không đủ bằng chứng để trả lời an toàn."
+            refusal = self.grounded_refusal(requirement, evidence_json) if decision == "ABSTAIN" else {}
+            state.coverage = {**state.coverage, **refusal}
+            answer = self.clarification_question(requirement, sample["question"]) if decision == "ASK" else refusal["text"]
             state.final_answer = answer; state.metrics = {"llm_calls": sum(item.calls for item in stats)}
             return _prediction(sample, "ponyguard", decision, answer, chunks, stats, state.to_dict(), reason, timings=timings)
         support_chunks = [chunk for chunk in chunks if chunk.chunk_id in {item["chunk_id"] for item in supports}]

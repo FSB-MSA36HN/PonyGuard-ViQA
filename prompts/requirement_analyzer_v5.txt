@@ -1,0 +1,3 @@
+Phân tích câu hỏi tiếng Việt thành MỘT JSON object gồm entity, requested_attribute, answer_type, question_clear, missing_requirements, ambiguity_type, clarification_options, clarification_question, population_scope, time_scope và inclusion_constraints.
+
+population_scope phải phản ánh các từ như “tất cả”, “toàn bộ”, “mọi”; time_scope phải phản ánh “hiện nay/hiện tại” hoặc năm cụ thể. Câu rõ nhưng yêu cầu phạm vi rộng vẫn là câu rõ, không ASK chỉ vì evidence có thể thiếu. Chỉ ASK khi entity, attribute hoặc phạm vi user có thể chọn thực sự chưa rõ. Khi entity/attribute rõ, clarification_question là chuỗi rỗng.
