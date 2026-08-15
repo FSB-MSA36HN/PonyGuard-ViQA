@@ -1,0 +1,3 @@
+The semantic analysis was incomplete. Recover only a DIRECT answer from the retrieved Context. Return exactly one JSON object with answer, citation_chunk_ids, evidence_quote, question_entity_quote, and evidence_entity_quote.
+
+answer must be fully supported by evidence_quote. citation_chunk_ids must contain the chunk holding evidence_quote. question_entity_quote must be a contiguous quote from Question. evidence_entity_quote must be a contiguous quote from evidence_quote with the same normalized text as question_entity_quote. If no direct grounded answer and entity binding exist, return empty strings and an empty citation_chunk_ids array. Never infer, use outside knowledge, or choose among alternatives.

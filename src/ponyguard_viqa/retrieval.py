@@ -44,7 +44,8 @@ class Retriever:
 
     def retrieve(self, question: str, top_k: int = 5) -> list[Chunk]:
         started = perf_counter()
-        vector = self.embedder.encode([question], query=True)
+        # Embeddings should not change retrieval solely because a user capitalized a word.
+        vector = self.embedder.encode([normalize_text(question).casefold()], query=True)
         embedded = perf_counter()
         # Import FAISS after Torch/SentenceTransformers on macOS to avoid their OpenMP loader conflict.
         if self.index is None:

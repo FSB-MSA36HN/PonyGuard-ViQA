@@ -1,13 +1,14 @@
 model:
-  name: mlx-community/Qwen2.5-7B-Instruct-4bit
+  name: Qwen/Qwen3-8B-MLX-4bit
+  gemini_model: gemini-3.6-flash
   temperature: 0
   max_tokens: 128
   stage_max_tokens:
-    requirement: 80
-    evidence: 256
+    requirement: 128
+    evidence: 512
     answer: 128
     verification: 128
-  backend: mlx
+  backend: gemini_auto
 retrieval:
   embedding_model: intfloat/multilingual-e5-small
   chunk_size: 400

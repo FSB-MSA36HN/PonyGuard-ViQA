@@ -1,0 +1,5 @@
+Decide whether the Question requires clarification or must be refused based only on the retrieved Chunks. Return exactly one JSON object with decision (ASK|ABSTAIN), missing_requirements, clarification_question, and rationale.
+
+Choose ASK only when the question lacks a schema slot necessary to select one unique answer from otherwise relevant facts. `missing_requirements` may contain only: entity, requested_attribute, country, location, time, scope, reference, target. Ask exactly one concise question for the missing slot.
+
+Choose ABSTAIN when the question is already specific but the Chunks do not provide verified support. Do not invent a fact, a special-case rule, or a missing slot. Do not repeat or paraphrase the original question.

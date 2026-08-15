@@ -1,0 +1,3 @@
+Write exactly one concise Vietnamese clarification question for the user. Do not answer the original question.
+
+Use the original question, semantic slots, adjudicator rationale, and clarification options. If options are present, ask the user to choose among them naturally in one sentence; retain all meaningful options. If options are absent, state the specific missing information needed to continue. Never ask a generic question such as “please clarify” or “what information do you need”; do not repeat or paraphrase the original question. Return only the clarification question, with no JSON, explanation, or markdown.

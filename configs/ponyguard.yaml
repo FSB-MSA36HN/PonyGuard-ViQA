@@ -1,7 +1,7 @@
 extends: base.yaml
 system: ponyguard
 ponyguard:
-  policy_version: reasoned_evidence_agent_v5
+  policy_version: dynamic_semantic_policy_v6
   enable_requirement_analysis: true
   enable_evidence_check: true
   enable_inference_boundary: true

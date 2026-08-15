@@ -4,7 +4,7 @@ Vietnamese RAG benchmark comparing Basic RAG, Prompt-Safe RAG, and PonyGuard: a 
 
 ## Requirements
 
-macOS on Apple Silicon, Python 3.10+, Git, and enough free disk space for the dataset/models. The default local model is `mlx-community/Qwen2.5-7B-Instruct-4bit`; no API key or server is needed.
+macOS on Apple Silicon, Python 3.10+, Git, and enough free disk space for the dataset/models. Set `GEMINI_API_KEY` in `.env` to use Gemini by default; the local `Qwen/Qwen3-8B-MLX-4bit` is used automatically only when Gemini returns a quota/rate-limit error.
 
 ## Commands
 
@@ -50,6 +50,6 @@ make test
 
 All systems share the exact corpus, index, embedding model, top-k, generator model and split. PonyGuard performs requirement analysis → evidence/inference decision → restricted draft answer → atomic claim verification → final `ANSWER`, `ASK`, or `ABSTAIN` gate. The original Ponytail repository is cloned unchanged into `external/ponytail`; its pinned commit is recorded in `configs/dependencies.yaml`.
 
-The comparison model is `mlx-community/Qwen2.5-7B-Instruct-4bit`. Basic RAG and Prompt-Safe RAG emit a literal cited evidence quote; an invalid quote/citation is withheld instead of being shown as a fact. Tune only on dev/validation; the frozen final test remains untouched.
+The default comparison provider is Gemini when `GEMINI_API_KEY` is configured; the selected Gemini model and actual per-stage provider are recorded in run metadata. Basic RAG and Prompt-Safe RAG emit a literal cited evidence quote; an invalid quote/citation is withheld instead of being shown as a fact. PonyGuard parses semantic slots (entity, requested attribute, answer type, missing slots) before it can ask a follow-up. Its runtime policy is dynamic and evidence-led; see [PROJECT_POLICY.md](PROJECT_POLICY.md). Tune only on dev/validation; the frozen final test remains untouched.
 
 The demo keeps one shared local model and retriever for both UI systems. Open **Timing theo stage** after a question to distinguish the one-time cold model/index load from normal inference; request timings are appended to `runs/ui_timing.jsonl`.

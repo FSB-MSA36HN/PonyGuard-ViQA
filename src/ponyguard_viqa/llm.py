@@ -4,8 +4,12 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from time import perf_counter
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 
 @dataclass
@@ -16,6 +20,46 @@ class LLMResponse:
     latency_ms: float
     calls: int = 1
     model_load_ms: float = 0.0
+    provider: str = "local"
+    model: str = ""
+    fallback_reason: str = ""
+
+
+class ProviderQuotaError(RuntimeError):
+    """A provider is temporarily unavailable, so automatic fallback is allowed."""
+
+
+def gemini_api_key() -> str:
+    """Read a local .env key without requiring another dependency or exposing it."""
+    if os.environ.get("GEMINI_API_KEY"):
+        return os.environ["GEMINI_API_KEY"]
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.exists():
+        return ""
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "GEMINI_API_KEY":
+            return value.strip().strip("'\"")
+    return ""
+
+
+def list_gemini_models(api_key: str | None = None) -> list[str]:
+    """Return only models this API key says can generate text."""
+    api_key = api_key or gemini_api_key()
+    if not api_key:
+        return []
+    url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+    request = Request(url, headers={"x-goog-api-key": api_key})
+    try:
+        with urlopen(request, timeout=12) as response:
+            payload = json.loads(response.read())
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+        return []
+    return sorted(
+        model["name"].removeprefix("models/")
+        for model in payload.get("models", [])
+        if "generateContent" in model.get("supportedGenerationMethods", [])
+    )
 
 
 class LocalLLM:
@@ -38,11 +82,14 @@ class LocalLLM:
                     {"role": "system", "content": "Bạn là trợ lý tiếng Việt. Luôn trả lời bằng tiếng Việt có dấu. Không dùng tiếng Trung hoặc tiếng Anh trong phần nội dung tự nhiên; chỉ giữ nguyên JSON keys và nhãn kỹ thuật khi được yêu cầu."},
                     {"role": "user", "content": prompt},
                 ]
-                rendered = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                try:
+                    rendered = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+                except TypeError:
+                    rendered = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
                 text = generate(self._model, self._tokenizer, prompt=rendered, max_tokens=max_tokens or self.max_tokens, verbose=False)
             except ImportError as error:
                 raise RuntimeError("mlx-lm is unavailable. Use backend: mock for tests or run bootstrap on Apple Silicon.") from error
-        return LLMResponse(text.strip(), len(prompt.split()), len(text.split()), (perf_counter()-started)*1000, model_load_ms=model_load_ms)
+        return LLMResponse(text.strip(), len(prompt.split()), len(text.split()), (perf_counter()-started)*1000, model_load_ms=model_load_ms, provider="local", model=self.model_name)
 
     def json(self, prompt: str, max_tokens: int | None = None) -> tuple[dict[str, Any], LLMResponse]:
         response = self.generate(prompt + "\nReturn ONLY a JSON object.") if max_tokens is None else self.generate(prompt + "\nReturn ONLY a JSON object.", max_tokens)
@@ -56,8 +103,8 @@ class LocalLLM:
                 value = self._extract_json(repaired.text)
             except ValueError:
                 # ponytail: fail closed; add a constrained decoder only if malformed JSON remains frequent after profiling.
-                return {"_parse_error": True}, LLMResponse(repaired.text, response.input_tokens + repaired.input_tokens, response.output_tokens + repaired.output_tokens, response.latency_ms + repaired.latency_ms, response.calls + repaired.calls, response.model_load_ms + repaired.model_load_ms)
-            return value, LLMResponse(repaired.text, response.input_tokens + repaired.input_tokens, response.output_tokens + repaired.output_tokens, response.latency_ms + repaired.latency_ms, response.calls + repaired.calls, response.model_load_ms + repaired.model_load_ms)
+                return {"_parse_error": True}, LLMResponse(repaired.text, response.input_tokens + repaired.input_tokens, response.output_tokens + repaired.output_tokens, response.latency_ms + repaired.latency_ms, response.calls + repaired.calls, response.model_load_ms + repaired.model_load_ms, repaired.provider, repaired.model, repaired.fallback_reason)
+            return value, LLMResponse(repaired.text, response.input_tokens + repaired.input_tokens, response.output_tokens + repaired.output_tokens, response.latency_ms + repaired.latency_ms, response.calls + repaired.calls, response.model_load_ms + repaired.model_load_ms, repaired.provider, repaired.model, repaired.fallback_reason)
 
     @staticmethod
     def _extract_json(text: str) -> dict[str, Any]:
@@ -92,3 +139,71 @@ class LocalLLM:
             if decision: value["decision"] = decision
             return json.dumps(value)
         return "Mock answer."
+
+
+class GeminiLLM(LocalLLM):
+    """Gemini REST adapter using the models exposed to the configured API key."""
+    def __init__(self, model: str, api_key: str, max_tokens: int = 256):
+        super().__init__(model, "gemini", max_tokens)
+        self.api_key = api_key
+
+    def generate(self, prompt: str, max_tokens: int | None = None) -> LLMResponse:
+        started = perf_counter()
+        model = self.model_name.removeprefix("models/")
+        generation_config = {"temperature": 0, "maxOutputTokens": max_tokens or self.max_tokens}
+        if "JSON object" in prompt:
+            generation_config["responseMimeType"] = "application/json"
+        body = {
+            "systemInstruction": {"parts": [{"text": "Bạn là trợ lý tiếng Việt. Luôn trả lời bằng tiếng Việt có dấu; chỉ giữ JSON keys và nhãn kỹ thuật khi được yêu cầu."}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": generation_config,
+        }
+        request = Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model, safe='-_.')}:generateContent",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=90) as response:
+                payload = json.loads(response.read())
+        except HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")
+            if error.code in {429, 500, 502, 503, 504} or "RESOURCE_EXHAUSTED" in detail:
+                raise ProviderQuotaError(f"Gemini temporarily unavailable ({error.code})") from error
+            raise RuntimeError(f"Gemini request failed ({error.code}): {detail[:300]}") from error
+        except (URLError, TimeoutError) as error:
+            raise ProviderQuotaError(f"Gemini network unavailable: {error}") from error
+        try:
+            parts = payload["candidates"][0]["content"]["parts"]
+            text = "".join(part.get("text", "") for part in parts).strip()
+        except (IndexError, KeyError, TypeError) as error:
+            if payload.get("candidates", [{}])[0].get("finishReason") == "MAX_TOKENS":
+                raise RuntimeError("Gemini exhausted max_output_tokens before returning text; increase the stage token budget.") from error
+            raise RuntimeError(f"Gemini returned no text: {json.dumps(payload)[:300]}") from error
+        return LLMResponse(text, len(prompt.split()), len(text.split()), (perf_counter()-started)*1000, provider="gemini", model=model)
+
+
+class FallbackLLM(LocalLLM):
+    """Use local MLX when Gemini has temporary capacity or network trouble."""
+    def __init__(self, primary: GeminiLLM, fallback: LocalLLM):
+        self.primary, self.fallback = primary, fallback
+        self.model_name, self.backend, self.max_tokens = primary.model_name, "gemini_auto", primary.max_tokens
+
+    def generate(self, prompt: str, max_tokens: int | None = None) -> LLMResponse:
+        try:
+            return self.primary.generate(prompt, max_tokens)
+        except ProviderQuotaError as error:
+            response = self.fallback.generate(prompt, max_tokens)
+            response.fallback_reason = str(error)
+            return response
+
+
+def build_llm(model_config: dict[str, Any], *, mock: bool = False, selected_model: str | None = None) -> LocalLLM:
+    """Construct the configured Gemini-first provider, with a local quota fallback."""
+    local = LocalLLM(model_config["name"], "mock" if mock else "mlx", model_config["max_tokens"])
+    if mock or selected_model == "local" or model_config.get("backend") != "gemini_auto":
+        return local
+    key = gemini_api_key()
+    model = selected_model or model_config.get("gemini_model", "")
+    return FallbackLLM(GeminiLLM(model, key, model_config["max_tokens"]), local) if key and model else local

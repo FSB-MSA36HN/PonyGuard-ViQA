@@ -4,13 +4,14 @@ import json
 import re
 from time import perf_counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from .core import Action, Chunk, PonyGuardState, Requirement, answer_matches_quote, missing_requirements_from_question, normalized_contains, normalize_text, question_ambiguity, question_scope
+from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, PonyGuardState, Requirement, answer_matches_quote, normalized_contains, normalize_text, tokenise
 from .llm import LocalLLM
 from .retrieval import Retriever
 
 PROMPTS = Path(__file__).resolve().parents[2] / "prompts"
+Progress = Callable[[str, str], None]
 
 
 def prompt(name: str) -> str:
@@ -19,6 +20,11 @@ def prompt(name: str) -> str:
 
 def context(chunks: list[Chunk]) -> str:
     return "\n\n".join(f"[{item.chunk_id}] {item.text}" for item in chunks)
+
+
+def report(progress: Progress | None, stage: str, message: str) -> None:
+    if progress:
+        progress(stage, message)
 
 
 def _prediction(sample: dict[str, Any], system: str, decision: Action, answer: str, chunks: list[Chunk], stats: list[Any], trace: dict[str, Any] | None = None, reason: str = "", grounding: dict[str, Any] | None = None, timings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -51,8 +57,14 @@ def validate_grounding(value: dict[str, Any], chunks: list[Chunk]) -> tuple[dict
 
 def _timed_json(llm: LocalLLM, label: str, value: str, max_tokens: int, timings: dict[str, Any]) -> tuple[dict[str, Any], Any]:
     started = perf_counter(); parsed, response = llm.json(value, max_tokens); elapsed = (perf_counter()-started)*1000
-    timings[label] = {"ms": round(elapsed, 2), "llm_calls": response.calls, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens, "cold_model_load_ms": round(response.model_load_ms, 2)}
+    timings[label] = {"ms": round(elapsed, 2), "llm_calls": response.calls, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens, "cold_model_load_ms": round(response.model_load_ms, 2), "provider": response.provider, "model": response.model, "fallback_reason": response.fallback_reason}
     return parsed, response
+
+
+def _timed_text(llm: LocalLLM, label: str, value: str, max_tokens: int, timings: dict[str, Any]) -> tuple[str, Any]:
+    started = perf_counter(); response = llm.generate(value, max_tokens); elapsed = (perf_counter()-started)*1000
+    timings[label] = {"ms": round(elapsed, 2), "llm_calls": response.calls, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens, "cold_model_load_ms": round(response.model_load_ms, 2), "provider": response.provider, "model": response.model, "fallback_reason": response.fallback_reason}
+    return normalize_text(response.text).strip("'\"` "), response
 
 
 def grounded_generation(llm: LocalLLM, instruction: str, question: str, chunks: list[Chunk], max_tokens: int, timings: dict[str, Any], label: str = "answer") -> tuple[dict[str, Any], list[Any], list[str]]:
@@ -72,24 +84,30 @@ def grounded_generation(llm: LocalLLM, instruction: str, question: str, chunks: 
 
 class BasicRAG:
     def __init__(self, retriever: Retriever, llm: LocalLLM, top_k: int = 5, stage_tokens: dict[str, int] | None = None): self.retriever, self.llm, self.top_k, self.stage_tokens = retriever, llm, top_k, {"answer": 128, **(stage_tokens or {})}
-    def run(self, sample: dict[str, Any]) -> dict[str, Any]:
+    def run(self, sample: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
+        report(progress, "search", "Searching sources")
         timings: dict[str, Any] = {}; chunks = self.retriever.retrieve(sample["question"], self.top_k); timings["retrieval"] = getattr(self.retriever, "last_timing", {})
+        report(progress, "answer", "Writing a grounded answer")
         value, stats, errors = grounded_generation(self.llm, prompt("basic_rag_v3.txt"), sample["question"], chunks, self.stage_tokens["answer"], timings)
         grounding = value.get("grounding") or validate_grounding(value, chunks)[0]
         decision: Action = "ANSWER" if grounding["valid"] else "ABSTAIN"
         answer = str(value.get("answer", "")) if decision == "ANSWER" else "Tài liệu hiện có không đủ bằng chứng đã kiểm chứng để trả lời an toàn."
+        report(progress, "decision", f"Decision: {decision}")
         return _prediction(sample, "basic_rag", decision, answer, chunks, stats, reason="" if grounding["valid"] else "invalid_grounding", grounding=grounding, timings=timings)
 
 
 class PromptSafeRAG(BasicRAG):
-    def run(self, sample: dict[str, Any]) -> dict[str, Any]:
+    def run(self, sample: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
+        report(progress, "search", "Searching sources")
         timings: dict[str, Any] = {}; chunks = self.retriever.retrieve(sample["question"], self.top_k); timings["retrieval"] = getattr(self.retriever, "last_timing", {})
+        report(progress, "answer", "Writing a grounded answer")
         parsed, stats, errors = grounded_generation(self.llm, prompt("prompt_safe_rag_v3.txt"), sample["question"], chunks, self.stage_tokens["answer"], timings)
         decision = parsed.get("decision", "ABSTAIN")
         if decision not in ("ANSWER", "ABSTAIN"): decision = "ABSTAIN"
         grounding = parsed.get("grounding") or validate_grounding(parsed, chunks)[0]
         if decision == "ANSWER" and not grounding["valid"]: decision = "ABSTAIN"
         answer = str(parsed.get("answer", "")) if decision == "ANSWER" else "Tài liệu hiện có không đủ bằng chứng đã kiểm chứng để trả lời an toàn."
+        report(progress, "decision", f"Decision: {decision}")
         return _prediction(sample, "prompt_safe_rag", decision, answer, chunks, stats, reason="" if grounding["valid"] else "invalid_grounding", grounding=grounding, timings=timings)
 
 
@@ -114,19 +132,47 @@ class PonyGuard:
 
     @staticmethod
     def apply_clarity_guard(question: str, requirement: Requirement) -> Requirement:
-        """The model may describe a requirement but may not invent an ASK state."""
-        missing, ambiguity = question_ambiguity(question)
-        requirement.missing_requirements = missing
-        requirement.question_clear = not missing
-        requirement.ambiguity_type = ambiguity
-        requirement.time_scope, requirement.population_scope, requirement.inclusion_constraints = question_scope(question)
-        if ambiguity == "AMBIGUOUS_ATTRIBUTE" and not requirement.entity:
-            match = re.search(r"^(?:hiện tại\s+)?(.+?)\s+(?:có\s+)?(?:bao\s+nhiêu|mấy)(?:\s+(?:cái|người))?\s*[?!.]*$", normalize_text(question), re.I)
-            if match: requirement.entity = match.group(1).strip()
-        requirement.clarification_options = PonyGuard.valid_options(requirement.clarification_options) if ambiguity == "AMBIGUOUS_ATTRIBUTE" else []
-        if ambiguity == "AMBIGUOUS_ATTRIBUTE" and not requirement.clarification_options: requirement.clarification_options = ["người", "tỉnh/thành", "cấp học"]
-        if not missing: requirement.clarification_question = ""
+        """Accept only schema slots; the model and evidence decide whether one is missing."""
+        model_missing = [normalize_text(str(item)).lower() for item in requirement.missing_requirements]
+        requirement.missing_requirements = list(dict.fromkeys(item for item in model_missing if item in MISSING_REQUIREMENT_SLOTS))
+        requirement.question_clear = not requirement.missing_requirements
+        requirement.ambiguity_type = "MISSING_REQUIREMENT" if requirement.missing_requirements else "NONE"
+        requirement.clarification_options = PonyGuard.valid_options(requirement.clarification_options) if requirement.missing_requirements else []
+        if not requirement.missing_requirements: requirement.clarification_question = ""
         return requirement
+
+    @staticmethod
+    def resolve_missing_with_evidence(requirement: Requirement, evidence: dict[str, Any]) -> Requirement:
+        """A direct, unique, validated fact defeats a spurious missing-slot label."""
+        if requirement.missing_requirements and evidence.get("valid_supports") and evidence.get("entity_match") and evidence.get("attribute_match") and not evidence.get("conflict_detected"):
+            requirement.missing_requirements = []
+            requirement.question_clear, requirement.ambiguity_type, requirement.clarification_question = True, "NONE", ""
+        return requirement
+
+    @staticmethod
+    def make_ask_safe(requirement: Requirement) -> Requirement:
+        """A semantic ASK must not degrade to ABSTAIN because an optional slot was malformed."""
+        if not requirement.missing_requirements:
+            requirement.missing_requirements = ["reference"]
+            requirement.question_clear, requirement.ambiguity_type = False, "MISSING_REQUIREMENT"
+        if not requirement.clarification_question:
+            requirement.clarification_question = "Bạn có thể làm rõ đối tượng hoặc thông tin bạn muốn biết không?"
+        return requirement
+
+    def refine_clarification(self, question: str, requirement: Requirement, rationale: str, timings: dict[str, Any]) -> tuple[str, Any | None]:
+        """Use plain-text generation so malformed JSON cannot make an ASK vague."""
+        if not hasattr(self.llm, "generate"):
+            return "", None
+        request = (f"{prompt('clarification_writer_v2.txt')}\nOriginal question: {question}\n"
+                   f"Missing slots: {', '.join(requirement.missing_requirements) or 'unknown'}\n"
+                   f"Current entity: {requirement.entity or 'unknown'}\n"
+                   f"Current attribute: {requirement.requested_attribute or 'unknown'}\n"
+                   f"Clarification options: {json.dumps(requirement.clarification_options, ensure_ascii=False)}\n"
+                   f"Adjudicator rationale: {rationale or 'unknown'}")
+        candidate, response = _timed_text(self.llm, "clarification_writer", request, self.stage_tokens["requirement"], timings)
+        if not candidate or normalize_text(question).casefold() in candidate.casefold():
+            return "", response
+        return candidate, response
 
     @staticmethod
     def valid_options(options: Any) -> list[str]:
@@ -164,31 +210,44 @@ class PonyGuard:
 
     @staticmethod
     def clarification_question(requirement: Requirement, question: str = "") -> str:
-        if requirement.ambiguity_type == "AMBIGUOUS_ATTRIBUTE":
-            entity = requirement.entity or "đối tượng này"
-            options = requirement.clarification_options
-            return f"Bạn muốn biết {entity} có mấy {', '.join(options[:-1])} hay mấy {options[-1]}?"
         generated = requirement.clarification_question.strip()
         if generated and (not question or normalize_text(question).lower() not in normalize_text(generated).lower()): return generated
+        if requirement.clarification_options:
+            subject = f" về {requirement.entity}" if requirement.entity else ""
+            return f"Bạn muốn làm rõ theo hướng nào{subject}: {' hay '.join(requirement.clarification_options)}?"
+        if requirement.ambiguity_type == "AMBIGUOUS_ATTRIBUTE":
+            entity = requirement.entity or "đối tượng này"
+            return f"Bạn muốn biết số lượng hoặc thuộc tính nào về {entity}?"
         if "entity" in requirement.missing_requirements:
             return f"Bạn đang hỏi {requirement.requested_attribute or 'thông tin này'} của ai hoặc đối tượng nào?"
         if "requested_attribute" in requirement.missing_requirements:
             return f"Bạn muốn biết thuộc tính hoặc thông tin nào về {requirement.entity or 'đối tượng đó'}?"
+        if "country" in requirement.missing_requirements:
+            return f"Bạn muốn biết {requirement.entity or 'thông tin này'} của quốc gia nào?"
+        if "location" in requirement.missing_requirements:
+            return f"Bạn muốn biết {requirement.entity or 'thông tin này'} ở địa điểm nào?"
+        if "time" in requirement.missing_requirements:
+            return f"Bạn muốn biết {requirement.entity or 'thông tin này'} vào thời điểm nào?"
+        if "scope" in requirement.missing_requirements:
+            return f"Bạn muốn hỏi {requirement.entity or 'thông tin này'} trong phạm vi nào?"
+        if "reference" in requirement.missing_requirements or "target" in requirement.missing_requirements:
+            return f"Bạn đang nói tới người, vật hoặc đối tượng nào khi hỏi về {requirement.requested_attribute or 'thông tin này'}?"
         return "Bạn có thể làm rõ chính xác thông tin cần hỏi không?"
 
     @staticmethod
     def coverage_probe_queries(requirement: Requirement, question: str) -> list[str]:
         base = " ".join(part for part in (requirement.entity, requirement.requested_attribute) if part) or question
-        probes = []
-        if requirement.population_scope == "ALL": probes.append(f"{base} tổng số toàn bộ")
-        if requirement.time_scope != "UNSPECIFIED": probes.append(f"{base} hiện nay" if requirement.time_scope == "CURRENT" else f"{base} {requirement.time_scope}")
-        return list(dict.fromkeys(probes))[:2]
+        return [base] if requirement.time_scope != "UNSPECIFIED" or requirement.population_scope != "UNSPECIFIED" else []
 
     @staticmethod
     def grounded_refusal(requirement: Requirement, evidence: dict[str, Any]) -> dict[str, Any]:
         supports = evidence.get("valid_supports", [])
-        facts = [{"chunk_id": item["chunk_id"], "text": item["evidence_quote"]} for item in supports[:2]]
+        observations = evidence.get("valid_observations", [])
+        facts = [{"chunk_id": item["chunk_id"], "text": item["evidence_quote"], "limitation": item.get("limitation", "")} for item in (supports or observations)[:2]]
         gaps = PonyGuard.text_items(evidence.get("coverage_gaps"))
+        audit_reason = normalize_text(str(evidence.get("clarification_adjudication", {}).get("rationale", "")))
+        if audit_reason:
+            gaps.insert(0, audit_reason)
         for item in supports:
             for reason in PonyGuard.text_items(item.get("mismatch_reasons")):
                 if reason not in gaps: gaps.append(str(reason))
@@ -196,36 +255,87 @@ class PonyGuard:
             gaps.append("Thời gian trong evidence không khớp thời gian được hỏi.")
         if requirement.population_scope != "UNSPECIFIED" and not any(item.get("matches_population") is True for item in supports):
             gaps.append("Evidence không xác nhận toàn bộ phạm vi/nhóm đối tượng được hỏi.")
-        gaps = list(dict.fromkeys(gaps)) or ["Không có evidence đã kiểm chứng bao phủ đầy đủ yêu cầu."]
+        gaps = list(dict.fromkeys(gaps)) or ["Các nguồn đã truy xuất không chứa evidence đã kiểm chứng cho yêu cầu này."]
         partial = supports[0].get("candidate_answer") if supports else ""
         rephrase = f"Nếu bạn muốn phạm vi hẹp hơn mà tài liệu nêu, có thể hỏi về {partial}." if partial else "Bạn có thể nêu phạm vi hoặc mốc thời gian hẹp hơn nếu phù hợp."
-        lines = ["Tôi chưa thể xác nhận câu trả lời cho đúng phạm vi bạn hỏi."]
-        if facts: lines.append("Tài liệu xác nhận: " + " ".join(f"“{item['text']}” [{item['chunk_id']}]" for item in facts))
-        lines.append("Vì chưa đủ: " + " ".join(gaps))
+        lines = ["Tôi chưa thể trả lời từ các nguồn đã truy xuất."]
+        if facts:
+            lines.append("Nguồn đã tìm thấy: " + " ".join(f"“{item['text']}” [{item['chunk_id']}]" for item in facts))
+            limitations = [str(item["limitation"]) for item in facts if item.get("limitation")]
+            if limitations:
+                gaps = limitations + gaps
+            elif gaps == ["Các nguồn đã truy xuất không chứa evidence đã kiểm chứng cho yêu cầu này."]:
+                target = " ".join(part for part in (requirement.requested_attribute, requirement.entity) if part) or "yêu cầu được hỏi"
+                gaps = [f"Các đoạn trên không có trích dẫn trực tiếp xác lập {target}."]
+        lines.append("Lý do: " + " ".join(gaps))
+        lines.append("Điều này cho thấy evidence đã retrieve chưa đủ; không khẳng định toàn bộ corpus không có thông tin.")
         lines.append(rephrase)
         return {"reason_summary": gaps[0], "supported_facts": facts, "coverage_gaps": gaps, "safe_rephrase": rephrase, "text": "\n\n".join(lines)}
 
-    def run(self, sample: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def semantic_contract_is_empty(evidence: dict[str, Any]) -> bool:
+        """Detect a syntactically valid but decision-incomplete model response."""
+        if evidence.get("_parse_error") or evidence.get("support"):
+            return False
+        return not (
+            normalize_text(str(evidence.get("entity", "")))
+            and normalize_text(str(evidence.get("requested_attribute", "")))
+            and isinstance(evidence.get("entity_match"), bool)
+            and isinstance(evidence.get("attribute_match"), bool)
+            and evidence.get("inference_level") in ("DIRECT", "SIMPLE_INFERENCE", "UNSUPPORTED")
+            and isinstance(evidence.get("reasoning_allowed"), bool)
+        )
+
+    def recover_direct_evidence(self, question: str, chunks: list[Chunk], timings: dict[str, Any]) -> tuple[dict[str, Any] | None, list[Any], list[str]]:
+        value, stats, errors = grounded_generation(self.llm, prompt("evidence_recovery_v1.txt"), question, chunks, self.stage_tokens["answer"], timings, "evidence_recovery")
+        grounding = value.get("grounding") or validate_grounding(value, chunks)[0]
+        binding = self.entity_binding_is_literal(question, grounding["evidence_quote"], value) if grounding["valid"] else False
+        if not grounding["valid"] or not binding:
+            return None, stats, errors + ([] if binding else ["Evidence recovery không xác minh được entity binding."])
+        support = {
+            "chunk_id": grounding["citation_chunk_ids"][0], "evidence_quote": grounding["evidence_quote"],
+            "candidate_answer": str(value.get("answer", "")), "support_type": "DIRECT",
+            "question_entity_quote": value.get("question_entity_quote", ""), "evidence_entity_quote": value.get("evidence_entity_quote", ""),
+        }
+        return {"draft": value, "grounding": grounding, "support": support}, stats, errors
+
+    def run(self, sample: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
         state = PonyGuardState(sample.get("sample_id"), sample["question"]); stats = []; timings: dict[str, Any] = {}
-        req_json, response = _timed_json(self.llm, "requirement", f"{prompt('requirement_analyzer_v5.txt')}\nQuestion: {sample['question']}", self.stage_tokens["requirement"], timings); stats.append(response)
-        requirement = Requirement(**{key: req_json.get(key) for key in Requirement.__dataclass_fields__ if key in req_json})
+        report(progress, "search", "Searching sources")
+        chunks = self.retriever.retrieve(sample["question"], self.top_k); timings["retrieval"] = getattr(self.retriever, "last_timing", {}); state.retrieval = {"chunks": [c.to_dict() for c in chunks]}
+        report(progress, "understand", "Understanding the question and evidence")
+        evidence_json, response = _timed_json(self.llm, "semantic_evidence", f"{prompt('semantic_evidence_v5.txt')}\nQuestion: {sample['question']}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
+        requirement = Requirement(**{key: evidence_json.get(key) for key in Requirement.__dataclass_fields__ if key in evidence_json})
         requirement = self.apply_clarity_guard(sample["question"], requirement)
         state.requirements = requirement.__dict__
-        if requirement.missing_requirements:
-            decision: Action = "ASK"; answer = self.clarification_question(requirement, sample["question"])
-            reason = self.decision_rationale(requirement, {}, decision)
-            state.decision, state.decision_reason, state.final_answer = decision, reason, answer
-            state.metrics = {"llm_calls": sum(item.calls for item in stats)}
-            return _prediction(sample, "ponyguard", decision, answer, [], stats, state.to_dict(), reason, timings=timings)
-        chunks = self.retriever.retrieve(sample["question"], self.top_k); timings["retrieval"] = getattr(self.retriever, "last_timing", {}); state.retrieval = {"chunks": [c.to_dict() for c in chunks]}
-        evidence_json, response = _timed_json(self.llm, "evidence", f"{prompt('evidence_scope_auditor_v1.txt')}\nRequirement: {json.dumps(state.requirements, ensure_ascii=False)}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
-        supports, rejected = self.validated_supports(evidence_json, chunks)
+        report(progress, "evidence", "Checking evidence")
+        supports, rejected = self.validated_supports(evidence_json, chunks, sample["question"])
+        semantic_incomplete = self.semantic_contract_is_empty(evidence_json)
         evidence_json["valid_supports"] = supports
         evidence_json["support_rejections"] = rejected
+        evidence_json["valid_observations"] = self.validated_observations(evidence_json, chunks)
         evidence_json["answerable_from_evidence"] = bool(supports)
         evidence_json["evidence_sufficient"] = bool(supports)
+        if supports and semantic_incomplete:
+            evidence_json.update({"entity_match": True, "attribute_match": True, "inference_level": "DIRECT", "reasoning_allowed": True, "answerable_from_evidence": True, "evidence_sufficient": True})
+        if chunks and not supports and not requirement.missing_requirements and semantic_incomplete:
+            report(progress, "evidence", "Recovering direct evidence")
+            recovered, recovery_stats, recovery_errors = self.recover_direct_evidence(sample["question"], chunks, timings); stats.extend(recovery_stats)
+            evidence_json["evidence_recovery"] = {"applied": bool(recovered), "errors": recovery_errors}
+            if recovered:
+                supports = [recovered["support"]]
+                evidence_json.update({"entity_match": True, "attribute_match": True, "inference_level": "DIRECT", "reasoning_allowed": True, "valid_supports": supports, "answerable_from_evidence": True, "evidence_sufficient": True, "_recovery_draft": recovered["draft"], "_recovery_grounding": recovered["grounding"]})
+        if not requirement.missing_requirements and not supports:
+            report(progress, "understand", "Deciding whether clarification is needed")
+            audit_json, response = _timed_json(self.llm, "clarification_adjudication", f"{prompt('clarification_adjudicator_v3.txt')}\nQuestion: {sample['question']}\nChunks:\n{context(chunks)}", self.stage_tokens["requirement"], timings); stats.append(response)
+            audit_requirement = self.apply_clarity_guard(sample["question"], Requirement(**{key: audit_json.get(key) for key in Requirement.__dataclass_fields__ if key in audit_json}))
+            if audit_json.get("decision") == "ASK":
+                audit_requirement = self.make_ask_safe(audit_requirement)
+                requirement = audit_requirement
+            evidence_json["clarification_adjudication"] = {"decision": audit_json.get("decision"), "rationale": audit_json.get("rationale", ""), "missing_requirements": audit_requirement.missing_requirements, "clarification_question": audit_requirement.clarification_question, "clarification_options": audit_requirement.clarification_options}
         if supports and not self.scope_matches(requirement, supports):
             probes = self.coverage_probe_queries(requirement, sample["question"])
+            report(progress, "search", "Checking source coverage")
             probe_chunks = [chunk for query in probes for chunk in self.retriever.retrieve(query, min(2, self.top_k))]
             seen = {chunk.chunk_id for chunk in chunks}
             for chunk in probe_chunks:
@@ -233,11 +343,22 @@ class PonyGuard:
                     chunks.append(chunk); seen.add(chunk.chunk_id)
             state.coverage = {"probe_queries": probes, "probe_chunk_ids": [chunk.chunk_id for chunk in probe_chunks]}
             state.retrieval = {"chunks": [chunk.to_dict() for chunk in chunks]}
-            evidence_json, response = _timed_json(self.llm, "scope_reaudit", f"{prompt('evidence_scope_auditor_v1.txt')}\nRequirement: {json.dumps(state.requirements, ensure_ascii=False)}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
-            supports, rejected = self.validated_supports(evidence_json, chunks)
-            evidence_json["valid_supports"], evidence_json["support_rejections"], evidence_json["answerable_from_evidence"], evidence_json["evidence_sufficient"] = supports, rejected, bool(supports), bool(supports)
+            evidence_json, response = _timed_json(self.llm, "scope_reaudit", f"{prompt('semantic_evidence_v5.txt')}\nQuestion: {sample['question']}\nChunks:\n{context(chunks)}", self.stage_tokens["evidence"], timings); stats.append(response)
+            supports, rejected = self.validated_supports(evidence_json, chunks, sample["question"])
+            evidence_json["valid_supports"], evidence_json["support_rejections"], evidence_json["valid_observations"], evidence_json["answerable_from_evidence"], evidence_json["evidence_sufficient"] = supports, rejected, self.validated_observations(evidence_json, chunks), bool(supports), bool(supports)
+        requirement = self.resolve_missing_with_evidence(requirement, evidence_json)
+        state.requirements = requirement.__dict__
         state.evidence = evidence_json; state.reasoning = {"level": evidence_json.get("inference_level"), "allowed": evidence_json.get("reasoning_allowed")}
         decision = self.decide(requirement, evidence_json) if self.enabled["requirement"] and self.enabled["inference"] else ("ANSWER" if evidence_json.get("evidence_sufficient") else "ABSTAIN")
+        if decision == "ASK":
+            report(progress, "understand", "Writing a focused clarification")
+            candidate, response = self.refine_clarification(sample["question"], requirement, str(evidence_json.get("clarification_adjudication", {}).get("rationale", "")), timings)
+            if response is not None:
+                stats.append(response)
+                evidence_json["clarification_writer"] = {"applied": bool(candidate), "question": candidate}
+            if candidate:
+                requirement.clarification_question = candidate
+            state.requirements = requirement.__dict__
         reason = self.decision_rationale(requirement, evidence_json, decision)
         state.decision, state.decision_reason = decision, reason
         if decision != "ANSWER":
@@ -245,33 +366,86 @@ class PonyGuard:
             state.coverage = {**state.coverage, **refusal}
             answer = self.clarification_question(requirement, sample["question"]) if decision == "ASK" else refusal["text"]
             state.final_answer = answer; state.metrics = {"llm_calls": sum(item.calls for item in stats)}
+            report(progress, "decision", f"Decision: {decision}")
             return _prediction(sample, "ponyguard", decision, answer, chunks, stats, state.to_dict(), reason, timings=timings)
         support_chunks = [chunk for chunk in chunks if chunk.chunk_id in {item["chunk_id"] for item in supports}]
-        draft_json, draft_stats, draft_errors = grounded_generation(self.llm, prompt("basic_rag_v3.txt"), sample["question"], support_chunks, self.stage_tokens["answer"], timings); stats.extend(draft_stats)
-        grounding = draft_json.get("grounding") or validate_grounding(draft_json, support_chunks)[0]
+        report(progress, "answer", "Writing from verified evidence")
+        if evidence_json.get("_recovery_draft"):
+            draft_json, draft_errors, grounding = evidence_json["_recovery_draft"], [], evidence_json["_recovery_grounding"]
+        else:
+            draft_json, draft_stats, draft_errors = grounded_generation(self.llm, prompt("basic_rag_v3.txt"), sample["question"], support_chunks, self.stage_tokens["answer"], timings); stats.extend(draft_stats)
+            grounding = draft_json.get("grounding") or validate_grounding(draft_json, support_chunks)[0]
         if not grounding["valid"]:
             state.evidence["draft_rejections"] = draft_errors; state.decision, state.final_answer = "ABSTAIN", "Tài liệu hiện có không đủ bằng chứng đã kiểm chứng để trả lời an toàn."
             return _prediction(sample, "ponyguard", "ABSTAIN", state.final_answer, chunks, stats, state.to_dict(), "invalid_grounding", grounding, timings)
         draft_answer = str(draft_json["answer"]); state.draft_answer = draft_answer
+        report(progress, "verify", "Verifying the answer")
         verified, response = _timed_json(self.llm, "verification", f"{prompt('claim_verifier_v2.txt')}\nAnswer: {draft_answer}\nEvidence quote: {grounding['evidence_quote']}\nEvidence:\n{context(support_chunks)}", self.stage_tokens["verification"], timings); stats.append(response)
         claims = verified.get("claims", []); state.claims = claims
         decision, answer = self.final_gate(claims, draft_answer) if self.enabled["verification"] else ("ANSWER", draft_answer)
+        if decision == "ABSTAIN":
+            refusal = self.grounded_refusal(requirement, evidence_json)
+            state.coverage = {**state.coverage, **refusal}
+            answer = refusal["text"]
         reason = self.decision_rationale(requirement, evidence_json, decision)
         state.decision, state.decision_reason, state.final_answer, state.metrics = decision, reason, answer, {"llm_calls": sum(item.calls for item in stats)}
+        report(progress, "decision", f"Decision: {decision}")
         return _prediction(sample, "ponyguard", decision, answer, chunks, stats, state.to_dict(), reason, grounding, timings)
 
     @staticmethod
-    def validated_supports(evidence: dict[str, Any], chunks: list[Chunk]) -> tuple[list[dict[str, Any]], list[str]]:
+    def validated_supports(evidence: dict[str, Any], chunks: list[Chunk], question: str = "") -> tuple[list[dict[str, Any]], list[str]]:
         valid, rejected = [], []
-        for support in evidence.get("support", []):
+        raw_supports = evidence.get("support", [])
+        if not raw_supports and all(evidence.get(key) is not None for key in ("chunk_id", "evidence_quote", "candidate_answer")):
+            raw_supports = [{key: evidence.get(key) for key in ("chunk_id", "evidence_quote", "candidate_answer", "support_type", "question_entity_quote", "evidence_entity_quote", "evidence_time_scope", "evidence_population_scope", "matches_time", "matches_population", "mismatch_reasons")}]
+        if isinstance(raw_supports, dict): raw_supports = [raw_supports]
+        for support in raw_supports:
             if not isinstance(support, dict): rejected.append("Support không phải object."); continue
             chunk = next((item for item in chunks if item.chunk_id == support.get("chunk_id")), None)
             quote, candidate = str(support.get("evidence_quote", "")), str(support.get("candidate_answer", ""))
             if not chunk: rejected.append("Support tham chiếu chunk không tồn tại.")
             elif not normalized_contains(chunk.text, quote): rejected.append(f"Quote không nằm trong {chunk.chunk_id}.")
             elif not answer_matches_quote(candidate, quote): rejected.append(f"Candidate answer không khớp quote của {chunk.chunk_id}.")
-            elif support.get("support_type") not in ("DIRECT", "SIMPLE_INFERENCE"): rejected.append(f"Support type không được phép ở {chunk.chunk_id}.")
-            else: valid.append({**support, "chunk_id": chunk.chunk_id})
+            elif question and not PonyGuard.entity_binding_is_literal(question, quote, support): rejected.append(f"Entity trong {chunk.chunk_id} không khớp thực thể được hỏi.")
+            elif str(support.get("support_type", "")).upper() not in ("DIRECT", "SIMPLE_INFERENCE"): rejected.append(f"Support type không được phép ở {chunk.chunk_id}.")
+            else: valid.append({**support, "chunk_id": chunk.chunk_id, "support_type": str(support["support_type"]).upper()})
         numeric_values = {tuple(re.findall(r"\d+(?:[.,]\d+)*", str(item.get("candidate_answer", "")))) for item in valid if item.get("support_type") == "DIRECT"}
         if len(numeric_values) > 1: evidence["conflict_detected"] = True; rejected.append("Các direct supports có giá trị số mâu thuẫn.")
         return valid, rejected
+
+    @staticmethod
+    def entity_binding_is_literal(question: str, evidence_quote: str, support: dict[str, Any]) -> bool:
+        question_entity = normalize_text(str(support.get("question_entity_quote", "")))
+        evidence_entity = normalize_text(str(support.get("evidence_entity_quote", "")))
+        if not (question_entity and evidence_entity and normalized_contains(question, question_entity) and normalized_contains(evidence_quote, evidence_entity)):
+            return False
+        if question_entity.casefold() == evidence_entity.casefold():
+            return True
+        shorter, longer = sorted((question_entity, evidence_entity), key=len)
+        return "Thông tin làm rõ từ người dùng:" in question and len(tokenise(shorter)) >= 2 and normalized_contains(longer, shorter)
+
+    @staticmethod
+    def validated_observations(evidence: dict[str, Any], chunks: list[Chunk]) -> list[dict[str, str]]:
+        """Keep only literal source excerpts for a transparent refusal."""
+        valid: list[dict[str, str]] = []
+        for observation in evidence.get("retrieved_observations", []):
+            if not isinstance(observation, dict):
+                continue
+            chunk = next((item for item in chunks if item.chunk_id == observation.get("chunk_id")), None)
+            quote = normalize_text(str(observation.get("evidence_quote", "")))
+            if chunk and quote and normalized_contains(chunk.text, quote):
+                valid.append({"chunk_id": chunk.chunk_id, "evidence_quote": quote, "limitation": normalize_text(str(observation.get("limitation", "")))})
+            if len(valid) == 2:
+                break
+        if valid:
+            return valid
+        return [{"chunk_id": chunk.chunk_id, "evidence_quote": PonyGuard.source_excerpt(chunk.text), "limitation": ""} for chunk in chunks[:2] if PonyGuard.source_excerpt(chunk.text)]
+
+    @staticmethod
+    def source_excerpt(text: str, limit: int = 280) -> str:
+        """A literal, bounded fallback excerpt when the model omits observations."""
+        text = normalize_text(text)
+        if len(text) <= limit:
+            return text
+        boundary = max(text.rfind(mark, 0, limit) for mark in ".!?;")
+        return text[:boundary + 1] if boundary > limit // 2 else text[:limit].rsplit(" ", 1)[0]

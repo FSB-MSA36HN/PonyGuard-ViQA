@@ -1,8 +1,8 @@
-from ponyguard_viqa.core import Chunk, Requirement, add_clarification, missing_requirements_from_question, stable_hash
+from ponyguard_viqa.core import Chunk, Requirement, add_clarification, stable_hash
 from ponyguard_viqa.data import clarification_set, stratified_splits
 from ponyguard_viqa.evaluation import metrics
 from ponyguard_viqa.pipelines import PonyGuard
-from ponyguard_viqa.llm import LLMResponse, LocalLLM
+from ponyguard_viqa.llm import FallbackLLM, GeminiLLM, LLMResponse, LocalLLM, ProviderQuotaError
 
 def row(number, action):
     return {"sample_id": str(number), "question": f"Question {number} text here", "context": "context", "gold_answers": ["a"], "is_answerable": action == "ANSWER", "expected_action": action, "source": "test"}
@@ -48,22 +48,22 @@ def test_ask_question_is_specific_to_the_missing_requirement():
     generated = Requirement(question_clear=False, clarification_question="Bạn đang hỏi năm sinh của ai?")
     assert PonyGuard.clarification_question(generated) == "Bạn đang hỏi năm sinh của ai?"
 
-def test_referent_guard_only_marks_real_underspecification():
-    assert missing_requirements_from_question("Ông ấy sinh năm bao nhiêu?") == ["entity"]
-    assert missing_requirements_from_question("Việt Nam có bao nhiêu?") == ["requested_attribute"]
-    assert missing_requirements_from_question("Việt Nam có bao nhiêu loài thực vật?") == []
+def test_requirement_contract_rejects_unknown_slots():
+    requirement = PonyGuard.apply_clarity_guard("Any question", Requirement(missing_requirements=["unknown", "country"]))
+    assert requirement.missing_requirements == ["country"]
 
 def test_clear_question_overrides_bad_llm_clarity_and_answers_with_direct_evidence():
     question = "Việt Nam có bao nhiêu loài thực vật?"
     bad_llm_requirement = Requirement(question_clear=False, missing_requirements=["entity"], clarification_question='Có phải bạn đang muốn hỏi "Việt Nam có bao nhiêu loài thực vật?"?')
     requirement = PonyGuard.apply_clarity_guard(question, bad_llm_requirement)
     evidence = {"entity_match": True, "attribute_match": True, "valid_supports": [{"chunk_id": "doc_003879_chunk_000001"}], "conflict_detected": False, "inference_level": "DIRECT", "reasoning_allowed": True, "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật."}
+    requirement = PonyGuard.resolve_missing_with_evidence(requirement, evidence)
     assert requirement.question_clear and not requirement.missing_requirements
     assert PonyGuard.decide(requirement, evidence) == "ANSWER"
     assert "15.986" in PonyGuard.decision_rationale(requirement, evidence, "ANSWER")
 
 def test_clear_question_without_evidence_abstains_not_asks():
-    requirement = PonyGuard.apply_clarity_guard("Việt Nam có bao nhiêu loài thực vật?", Requirement(question_clear=False, missing_requirements=["entity"]))
+    requirement = PonyGuard.apply_clarity_guard("Việt Nam có bao nhiêu loài thực vật?", Requirement())
     evidence = {"entity_match": False, "attribute_match": False, "evidence_sufficient": False, "conflict_detected": False, "inference_level": "UNSUPPORTED", "reasoning_allowed": False, "missing_evidence": ["số loài thực vật ở Việt Nam"]}
     assert PonyGuard.decide(requirement, evidence) == "ABSTAIN"
 
@@ -89,8 +89,7 @@ def test_vietnam_plants_regression_answers_despite_bad_requirement_label():
         def retrieve(self, *_): return [Chunk("doc_003879", "doc_003879_chunk_000001", "Việt Nam có 15.986 loài thực vật.")]
     class LLMStub:
         def __init__(self): self.outputs = iter([
-            {"entity": None, "requested_attribute": "số loài thực vật", "question_clear": False, "missing_requirements": ["entity"], "clarification_question": 'Có phải bạn đang muốn hỏi "Việt Nam có bao nhiêu loài thực vật?"?'},
-            {"entity_match": True, "attribute_match": True, "conflict_detected": False, "inference_level": "DIRECT", "reasoning_allowed": True, "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật.", "support": [{"chunk_id": "doc_003879_chunk_000001", "evidence_quote": "Việt Nam có 15.986 loài thực vật.", "candidate_answer": "15.986 loài thực vật", "support_type": "DIRECT"}]},
+                {"entity": None, "requested_attribute": "số loài thực vật", "question_clear": False, "missing_requirements": ["entity"], "clarification_question": 'Có phải bạn đang muốn hỏi "Việt Nam có bao nhiêu loài thực vật?"?', "entity_match": True, "attribute_match": True, "conflict_detected": False, "inference_level": "DIRECT", "reasoning_allowed": True, "decision_rationale": "Chunk nêu trực tiếp 15.986 loài thực vật.", "support": [{"chunk_id": "doc_003879_chunk_000001", "evidence_quote": "Việt Nam có 15.986 loài thực vật.", "candidate_answer": "15.986 loài thực vật", "support_type": "DIRECT", "question_entity_quote": "Việt Nam", "evidence_entity_quote": "Việt Nam"}]},
             {"answer": "15.986 loài thực vật", "citation_chunk_ids": ["doc_003879_chunk_000001"], "evidence_quote": "Việt Nam có 15.986 loài thực vật."},
             {"claims": [{"claim_id": "c1", "text": "Việt Nam có 15.986 loài thực vật.", "label": "SUPPORTED", "evidence_chunk_ids": ["doc_003879_chunk_000001"]}]},
         ])
@@ -113,3 +112,28 @@ def test_json_parser_fails_closed_after_two_malformed_outputs():
     llm.generate = lambda *_: LLMResponse("{broken", 1, 1, 1)  # type: ignore[method-assign]
     value, response = llm.json("anything", 80)
     assert value == {"_parse_error": True} and response.calls == 2
+
+
+def test_temporary_provider_error_falls_back_to_local_but_other_errors_do_not():
+    class Primary:
+        model_name = "gemini-test"
+        max_tokens = 8
+        def generate(self, *_): raise ProviderQuotaError("Gemini temporarily unavailable (503)")
+    class Fallback:
+        def generate(self, *_): return LLMResponse("local", 1, 1, 1, provider="local", model="local-test")
+    response = FallbackLLM(Primary(), Fallback()).generate("test")
+    assert response.text == "local" and response.fallback_reason == "Gemini temporarily unavailable (503)"
+
+
+def test_gemini_uses_json_mime_type_for_structured_requests(monkeypatch):
+    captured = {}
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self): return b'{"candidates":[{"content":{"parts":[{"text":"{}"}]}}]}'
+    def request(*args, **kwargs):
+        captured["body"] = __import__("json").loads(args[0].data)
+        return Response()
+    monkeypatch.setattr("ponyguard_viqa.llm.urlopen", request)
+    GeminiLLM("gemini-test", "key").generate("Return ONLY a JSON object.")
+    assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"

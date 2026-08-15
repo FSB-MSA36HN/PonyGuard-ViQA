@@ -1,1 +1,0 @@
-Phân tích câu hỏi tiếng Việt thành entity, requested_attribute, answer_type, question_clear, missing_requirements. Nếu entity hay thuộc tính cần thiết bị thiếu/đại từ mơ hồ, question_clear=false.

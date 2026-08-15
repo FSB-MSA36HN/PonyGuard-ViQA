@@ -10,6 +10,7 @@ from typing import Any, Literal
 import yaml
 
 Action = Literal["ANSWER", "ASK", "ABSTAIN"]
+MISSING_REQUIREMENT_SLOTS = frozenset({"entity", "requested_attribute", "country", "location", "time", "scope", "reference", "target"})
 
 
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
@@ -56,32 +57,6 @@ def answer_matches_quote(answer: str, quote: str) -> bool:
 def add_clarification(question: str, clarification: str) -> str:
     """Clarification defines the request; it is never injected as retrieved evidence."""
     return f"{normalize_text(question)}\n\nThông tin làm rõ từ người dùng: {normalize_text(clarification)}"
-
-
-def missing_requirements_from_question(question: str) -> list[str]:
-    """Only genuine underspecification is eligible for ASK; LLM labels cannot add it."""
-    return question_ambiguity(question)[0]
-
-
-def question_ambiguity(question: str) -> tuple[list[str], str]:
-    """Deterministic ASK eligibility; a model may not invent ambiguity."""
-    text = normalize_text(question).lower()
-    if "thông tin làm rõ từ người dùng:" in text: return [], "NONE"
-    if re.search(r"\b(ông ấy|bà ấy|người này|người đó|người kia|nó|họ)\b", text): return ["entity"], "MISSING_ENTITY"
-    if re.search(r"\b(?:có\s+)?(?:bao\s+nhiêu|mấy)(?:\s+(?:cái|người))?\s*[?!.]*$", text): return ["requested_attribute"], "AMBIGUOUS_ATTRIBUTE"
-    return [], "NONE"
-
-
-def question_scope(question: str) -> tuple[str, str, list[str]]:
-    """Deterministic constraints that a retrieved fact must satisfy."""
-    text = normalize_text(question).lower()
-    year = re.search(r"\bnăm\s+(19|20)\d{2}\b", text)
-    time_scope = year.group() if year else ("CURRENT" if re.search(r"\b(hiện nay|hiện tại|bây giờ)\b", text) else "UNSPECIFIED")
-    population_scope = "ALL" if re.search(r"\b(tất cả|toàn bộ|mọi)\b", text) else "UNSPECIFIED"
-    constraints = []
-    if time_scope != "UNSPECIFIED": constraints.append(time_scope)
-    if population_scope == "ALL": constraints.append("all requested categories")
-    return time_scope, population_scope, constraints
 
 
 def tokenise(value: str) -> list[str]:

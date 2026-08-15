@@ -1,3 +1,0 @@
-Đối chiếu requirement với retrieved chunks và trả MỘT JSON object gồm entity_match, attribute_match, evidence_found, evidence_sufficient, conflict_detected, supporting_chunk_ids, missing_evidence, inference_level (DIRECT/SIMPLE_INFERENCE/UNSUPPORTED), reasoning_allowed, answerable_from_evidence, decision_rationale.
-
-answerable_from_evidence=true chỉ khi một hoặc nhiều chunks nêu trực tiếp câu trả lời hoặc cho phép SIMPLE_INFERENCE. decision_rationale phải bằng tiếng Việt, ngắn, nêu fact/chunk hỗ trợ hoặc phần evidence còn thiếu. Không coi similarity là evidence. Câu hỏi rõ nhưng evidence thiếu phải để evidence_sufficient=false, không yêu cầu user hỏi lại.

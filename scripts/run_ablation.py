@@ -3,7 +3,7 @@ import argparse, json
 from pathlib import Path
 from ponyguard_viqa.core import load_config, read_jsonl, write_jsonl
 from ponyguard_viqa.evaluation import metrics
-from ponyguard_viqa.llm import LocalLLM
+from ponyguard_viqa.llm import build_llm
 from ponyguard_viqa.pipelines import PonyGuard
 from ponyguard_viqa.retrieval import Embedder, Retriever
 
@@ -16,7 +16,7 @@ def main():
     rows = read_jsonl(args.input)[:args.limit]
     result = {}
     for name, enabled in VARIANTS.items():
-        pipeline = PonyGuard(retriever, LocalLLM(m["name"], "mock" if args.mock else m["backend"], m["max_tokens"]), r["top_k"], enabled)
+        pipeline = PonyGuard(retriever, build_llm(m, mock=args.mock), r["top_k"], enabled)
         predictions = [pipeline.run(row) for row in rows]; write_jsonl(f"runs/ablations/{name}.jsonl", predictions); result[name] = metrics(predictions)
     Path("reports/ablation.json").write_text(json.dumps(result, indent=2)); print(json.dumps(result, indent=2))
 

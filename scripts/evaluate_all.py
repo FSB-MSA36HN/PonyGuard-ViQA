@@ -4,7 +4,7 @@ from pathlib import Path
 from ponyguard_viqa.core import load_config, read_jsonl, stable_hash, write_jsonl
 from ponyguard_viqa.data import verify_frozen_split
 from ponyguard_viqa.evaluation import audit_claims, markdown_table, metrics
-from ponyguard_viqa.llm import LocalLLM
+from ponyguard_viqa.llm import build_llm
 
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument("--input", default="data/benchmark/test.jsonl"); parser.add_argument("--limit", type=int); parser.add_argument("--mock", action="store_true"); args = parser.parse_args()
@@ -18,7 +18,7 @@ def main():
         path = Path(f"runs/{system}/{Path(args.input).stem}_predictions.jsonl")
         rows = read_jsonl(path)
         config = load_config("configs/base.yaml")["model"]
-        auditor = LocalLLM(config["name"], "mock" if args.mock else config["backend"], config["max_tokens"])
+        auditor = build_llm(config, mock=args.mock)
         for row in rows: row["audit_claims"] = audit_claims(row, auditor)
         write_jsonl(path, rows); results[system] = metrics(rows)
     Path("reports").mkdir(exist_ok=True)

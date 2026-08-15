@@ -1,0 +1,7 @@
+Decide whether the Question requires clarification or must be refused based only on the retrieved Chunks. Return exactly one JSON object with decision (ASK|ABSTAIN), missing_requirements, clarification_question, clarification_options, and rationale.
+
+First test answer uniqueness: if two reasonable interpretations of an omitted context, target, requested attribute, or meaning could lead to different valid answers, choose ASK. This remains true even when the Chunks do not contain a complete answer. `missing_requirements` may contain only: entity, requested_attribute, country, location, time, scope, reference, target.
+
+When more than one independent interpretation is plausible, return two or three short, user-facing `clarification_options` that name those interpretations. Ask one concise selection question that includes the alternatives instead of asking only for one schema slot. Derive options from the Question and Chunks; do not invent facts, fixed examples, or special-case rules. When exactly one schema slot is missing, ask one concise question for it.
+
+Choose ABSTAIN only when the Question already identifies a unique target and requested attribute, but the Chunks cannot provide verified support. When uncertain whether an omitted detail changes the answer, choose ASK. Do not repeat or paraphrase the original question.

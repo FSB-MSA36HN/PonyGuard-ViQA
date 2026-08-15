@@ -1,4 +1,4 @@
-from ponyguard_viqa.core import Requirement, question_scope
+from ponyguard_viqa.core import Requirement
 from ponyguard_viqa.core import Chunk
 from ponyguard_viqa.llm import LLMResponse
 from ponyguard_viqa.pipelines import PonyGuard
@@ -9,6 +9,8 @@ HANOI_SUPPORT = {
     "evidence_quote": "Năm 2009, Hà Nội có 677 trường tiểu học, 581 trường trung học cơ sở và 186 trường trung học phổ thông với 27.552 lớp học, 982.579 học sinh.",
     "candidate_answer": "982.579 học sinh",
     "support_type": "DIRECT",
+    "question_entity_quote": "Hà Nội",
+    "evidence_entity_quote": "Hà Nội",
     "matches_time": False,
     "matches_population": False,
     "mismatch_reasons": ["Evidence nêu năm 2009, không phải hiện tại.", "Evidence chỉ nêu tiểu học, THCS và THPT; không xác nhận tất cả loại trường."],
@@ -32,8 +34,9 @@ def test_narrow_2009_school_question_can_answer_when_scope_matches():
     assert PonyGuard.decide(requirement, evidence) == "ANSWER"
 
 
-def test_scope_detector_marks_current_and_all_without_making_question_ambiguous():
-    assert question_scope("Hiện tại Hà Nội có bao nhiêu học sinh ở tất cả các trường?") == ("CURRENT", "ALL", ["CURRENT", "all requested categories"])
+def test_scope_is_evaluated_from_semantic_contract_values():
+    requirement = Requirement(time_scope="CURRENT", population_scope="ALL")
+    assert not PonyGuard.scope_matches(requirement, [{"matches_time": False, "matches_population": True}])
 
 
 def test_string_coverage_gap_is_rendered_as_one_reason_not_characters():
@@ -45,6 +48,22 @@ def test_string_coverage_gap_is_rendered_as_one_reason_not_characters():
     assert all(len(gap) > 1 for gap in refusal["coverage_gaps"])
 
 
+def test_refusal_uses_the_dynamic_adjudicator_reason_and_does_not_claim_corpus_absence():
+    requirement = Requirement()
+    evidence = {"valid_supports": [], "clarification_adjudication": {"rationale": "The retrieved sources discuss unrelated topics and do not establish the requested concept."}}
+    refusal = PonyGuard.grounded_refusal(requirement, evidence)
+    assert refusal["coverage_gaps"][0].startswith("The retrieved sources")
+    assert "không khẳng định toàn bộ corpus" in refusal["text"]
+
+
+def test_refusal_shows_literal_retrieved_observations_when_no_answer_support_exists():
+    chunk = Chunk("holiday", "holiday_1", "Ngày 4 tháng 7 là Quốc khánh Hoa Kỳ.")
+    evidence = {"valid_supports": [], "valid_observations": PonyGuard.validated_observations({"retrieved_observations": [{"chunk_id": "holiday_1", "evidence_quote": "Ngày 4 tháng 7 là Quốc khánh Hoa Kỳ.", "limitation": "Đoạn này chỉ nêu ngày của một quốc gia, không định nghĩa khái niệm được hỏi."}]}, [chunk])}
+    refusal = PonyGuard.grounded_refusal(Requirement(entity="Quốc khánh", requested_attribute="khái niệm"), evidence)
+    assert "Ngày 4 tháng 7" in refusal["text"]
+    assert "không định nghĩa" in refusal["text"]
+
+
 def test_pipeline_runs_bounded_coverage_probes_then_returns_grounded_refusal():
     chunk = Chunk("doc_004269", "doc_004269_chunk_000001", HANOI_SUPPORT["evidence_quote"])
     class Retriever:
@@ -53,8 +72,7 @@ def test_pipeline_runs_bounded_coverage_probes_then_returns_grounded_refusal():
         def retrieve(self, query, *_): self.queries.append(query); return [chunk]
     class LLM:
         def __init__(self): self.values = iter([
-            {"entity": "Hà Nội", "requested_attribute": "số học sinh"},
-            {"entity_match": True, "attribute_match": True, "conflict_detected": False, "reasoning_allowed": True, "inference_level": "DIRECT", "support": [HANOI_SUPPORT]},
+            {"entity": "Hà Nội", "requested_attribute": "số học sinh", "time_scope": "CURRENT", "population_scope": "ALL", "entity_match": True, "attribute_match": True, "conflict_detected": False, "reasoning_allowed": True, "inference_level": "DIRECT", "support": [HANOI_SUPPORT]},
             {"entity_match": True, "attribute_match": True, "conflict_detected": False, "reasoning_allowed": True, "inference_level": "DIRECT", "support": [HANOI_SUPPORT]},
         ])
         def json(self, *_): return next(self.values), LLMResponse("{}", 1, 1, 1)
@@ -62,5 +80,5 @@ def test_pipeline_runs_bounded_coverage_probes_then_returns_grounded_refusal():
     result = PonyGuard(retriever, LLM()).run({"sample_id": "hn", "question": "Hiện tại Hà Nội có bao nhiêu học sinh ở tất cả các trường học?", "gold_answers": [], "expected_action": "ABSTAIN"})
     assert result["prediction"]["decision"] == "ABSTAIN"
     assert "982.579" in result["prediction"]["answer"]
-    assert len(retriever.queries) == 3
+    assert len(retriever.queries) == 2
     assert result["trace"]["coverage"]["probe_queries"]

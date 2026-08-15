@@ -1,3 +1,0 @@
-Phân tích câu hỏi tiếng Việt thành MỘT JSON object gồm entity, requested_attribute, answer_type, question_clear, missing_requirements, ambiguity_type (NONE/MISSING_ENTITY/MISSING_ATTRIBUTE/AMBIGUOUS_ATTRIBUTE), clarification_options và clarification_question.
-
-`AMBIGUOUS_ATTRIBUTE` chỉ dùng khi câu có entity nhưng phần thuộc tính bị bỏ lửng, như “Việt Nam có mấy?”. Khi đó clarification_options là tối đa ba cụm thuộc tính ngắn, có thể là ví dụ liên quan, không phải facts hay câu trả lời. Nếu entity và thuộc tính đã rõ như “Việt Nam có bao nhiêu cấp học?”, ambiguity_type là NONE và không hỏi lại. clarification_question chỉ có khi thiếu thông tin, không lặp/paraphrase nguyên câu hỏi. Khi câu rõ, options là [] và clarification_question là chuỗi rỗng.

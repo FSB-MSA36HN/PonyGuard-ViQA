@@ -1,1 +1,0 @@
-Đối chiếu requirement với chunks. Trả entity_match, attribute_match, evidence_found, evidence_sufficient, conflict_detected, supporting_chunk_ids, missing_evidence, inference_level (DIRECT/SIMPLE_INFERENCE/UNSUPPORTED), reasoning_allowed. Không coi similarity là bằng chứng.
