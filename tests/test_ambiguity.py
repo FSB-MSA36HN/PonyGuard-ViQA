@@ -18,10 +18,112 @@ def test_explicit_quantity_attribute_is_not_ambiguous():
         assert PonyGuard.apply_clarity_guard(question, Requirement()).missing_requirements == []
 
 
+def test_extracted_slots_cannot_also_be_used_to_ask_the_same_question_again():
+    requirement = PonyGuard.apply_clarity_guard("con người có mấy cái đầu?", Requirement(entity="con người", requested_attribute="số lượng đầu", missing_requirements=["entity", "requested_attribute"]))
+    assert requirement.question_clear and not requirement.missing_requirements
+
+
+def test_optional_context_slot_flood_cannot_turn_a_clear_relation_into_ask():
+    requirement = PonyGuard.apply_clarity_guard(
+        "What is the difference between the two stated rates?",
+        Requirement(entity="the two stated rates", requested_attribute="difference", missing_requirements=["country", "location", "time", "scope"]),
+    )
+    assert requirement.question_clear and not requirement.missing_requirements
+
+
+def test_clear_requirement_contract_with_an_omitted_slot_becomes_an_ask():
+    requirement = PonyGuard.enforce_requirement_contract(
+        {"question_clear": True, "entity": "an entity", "requested_attribute": None},
+        Requirement(entity="an entity", question_clear=True),
+    )
+    requirement = PonyGuard.apply_clarity_guard("A complete-looking question", requirement)
+    assert requirement.missing_requirements == ["requested_attribute"]
+
+
+def test_partial_requirement_contract_with_only_an_entity_becomes_an_ask():
+    requirement = PonyGuard.enforce_requirement_contract(
+        {"entity": "an entity"},
+        Requirement(entity="an entity"),
+    )
+    requirement = PonyGuard.apply_clarity_guard("A question", requirement)
+    assert requirement.missing_requirements == ["requested_attribute"]
+
+
+def test_partial_semantic_output_cannot_turn_an_incomplete_request_into_abstain():
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return []
+
+    class LLM:
+        def json(self, *_): return {"entity": "an entity"}, LLMResponse("{}", 1, 1, 1)
+
+    result = PonyGuard(Retriever(), LLM()).run({"sample_id": "partial-contract", "question": "An incomplete quantity request", "gold_answers": [], "expected_action": "ASK"})
+    assert result["prediction"]["decision"] == "ASK"
+    assert result["trace"]["requirements"]["missing_requirements"] == ["requested_attribute"]
+
+
+def test_malformed_semantic_output_recovers_requirements_before_deciding():
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return []
+
+    class LLM:
+        def __init__(self): self.outputs = iter([
+            {"_parse_error": True},
+            {"entity": "an entity", "requested_attribute": None, "question_clear": False, "missing_requirements": ["requested_attribute"]},
+        ])
+        def json(self, *_): return next(self.outputs), LLMResponse("{}", 1, 1, 1)
+
+    result = PonyGuard(Retriever(), LLM()).run({"sample_id": "recovered-requirement", "question": "An incomplete request", "gold_answers": [], "expected_action": "ASK"})
+    assert result["prediction"]["decision"] == "ASK"
+    assert result["trace"]["evidence"]["requirement_recovery"]["applied"] is True
+
+
 def test_followup_clears_ambiguity_without_becoming_evidence():
     merged = add_clarification("Hiện tại Việt Nam có mấy?", "Tôi hỏi mấy cấp học.")
     requirement = PonyGuard.apply_clarity_guard(merged, Requirement())
     assert requirement.ambiguity_type == "NONE" and not requirement.missing_requirements
+
+
+def test_supplied_clarification_resolves_the_slot_asked_on_the_previous_turn():
+    question = add_clarification("toán học có mấy phép toán?", "trong lĩnh vực đại số tuyến tính nhé")
+    requirement = PonyGuard.apply_user_clarification(
+        question,
+        PonyGuard.apply_clarity_guard(question, Requirement(entity="toán học", requested_attribute="phép toán", missing_requirements=["scope"])),
+        ["scope"],
+    )
+    assert requirement.question_clear and not requirement.missing_requirements
+
+
+def test_legacy_chat_reply_matching_the_only_offered_option_also_resolves_it():
+    question = add_clarification("toán học có mấy phép toán?", "trong lĩnh vực đại số tuyến tính nhé")
+    requirement = PonyGuard.apply_user_clarification(
+        question,
+        PonyGuard.apply_clarity_guard(question, Requirement(missing_requirements=["scope"], clarification_options=["trong lĩnh vực đại số tuyến tính"])),
+    )
+    assert requirement.question_clear and not requirement.missing_requirements
+
+
+def test_adjudicator_cannot_reopen_a_slot_completed_by_the_user():
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return []
+
+    class LLM:
+        def __init__(self):
+            self.outputs = iter([
+                {"entity": "toán học", "requested_attribute": "phép toán", "missing_requirements": ["scope"], "clarification_options": ["trong lĩnh vực đại số tuyến tính"], "entity_match": False, "attribute_match": False, "conflict_detected": False, "inference_level": "UNSUPPORTED", "reasoning_allowed": False, "support": []},
+                {"decision": "ASK", "entity": "toán học", "requested_attribute": "phép toán", "missing_requirements": ["scope"], "clarification_question": "Bạn muốn hỏi trong phạm vi nào?"},
+            ])
+        def json(self, *_): return next(self.outputs), LLMResponse("{}", 1, 1, 1)
+
+    result = PonyGuard(Retriever(), LLM()).run({
+        "sample_id": "completed-slot",
+        "question": add_clarification("toán học có mấy phép toán?", "trong lĩnh vực đại số tuyến tính nhé"),
+        "clarification_for": ["scope"], "gold_answers": [], "expected_action": "ABSTAIN",
+    })
+    assert result["prediction"]["decision"] == "ABSTAIN"
+    assert result["trace"]["evidence"]["clarification_adjudication"]["missing_requirements"] == []
 
 
 def test_model_options_are_short_suggestions_not_facts_or_fallbacks():
@@ -38,6 +140,14 @@ def test_country_dependent_date_keeps_a_vetted_semantic_missing_slot():
     assert not requirement.question_clear and requirement.missing_requirements == ["country"]
     assert requirement.requested_attribute == "ngày diễn ra" and requirement.answer_type == "DATE"
     assert PonyGuard.clarification_question(requirement, question) == "Bạn muốn biết Quốc khánh của quốc gia nào?"
+
+
+def test_malformed_missing_slot_flood_is_deferred_instead_of_forcing_ask():
+    requirement = PonyGuard.apply_clarity_guard(
+        "Define the quoted expression.",
+        Requirement(requested_attribute="definition", missing_requirements=["entity", "location", "time", "scope"]),
+    )
+    assert requirement.question_clear and not requirement.missing_requirements
 
 
 def test_semantic_asks_cover_common_missing_slots_without_accepting_bad_entity_labels():
@@ -129,7 +239,7 @@ def test_adjudication_can_ask_for_a_missing_requested_attribute_without_support(
     assert result["prediction"]["decision"] == "ASK"
 
 
-def test_adjudication_ask_survives_an_invalid_or_missing_slot():
+def test_invalid_semantic_output_fails_closed_to_abstain_not_an_unverified_ask():
     class Retriever:
         last_timing = {}
         def retrieve(self, *_): return []
@@ -138,13 +248,13 @@ def test_adjudication_ask_survives_an_invalid_or_missing_slot():
         def __init__(self):
             self.outputs = iter([
                 {"_parse_error": True, "support": []},
-                {"decision": "ASK", "rationale": "The request needs clarification."},
+                {"_parse_error": True},
             ])
         def json(self, *_): return next(self.outputs), LLMResponse("{}", 1, 1, 1)
 
     result = PonyGuard(Retriever(), LLM()).run({"sample_id": "malformed", "question": "An incomplete request", "gold_answers": [], "expected_action": "ASK"})
-    assert result["prediction"]["decision"] == "ASK"
-    assert result["trace"]["requirements"]["missing_requirements"] == ["reference"]
+    assert result["prediction"]["decision"] == "ABSTAIN"
+    assert "output không hợp lệ" in result["prediction"]["answer"]
 
 
 def test_clarification_writer_replaces_a_generic_fallback_with_a_specific_question():
@@ -156,3 +266,12 @@ def test_clarification_writer_replaces_a_generic_fallback_with_a_specific_questi
     question, response = PonyGuard(None, LLM()).refine_clarification("Một ngày lễ là gì?", requirement, "Thiếu ngữ cảnh.", {})
     assert response is not None
     assert question == "Bạn muốn biết ngày này của quốc gia nào?"
+
+
+def test_clarification_writer_rejects_an_incomplete_unanchored_question():
+    class LLM:
+        def generate(self, *_): return LLMResponse("Bạn muốn biết", 1, 1, 1)
+
+    requirement = Requirement(entity="an entity", missing_requirements=["requested_attribute"])
+    question, response = PonyGuard(None, LLM()).refine_clarification("An entity has how many?", requirement, "", {})
+    assert response is not None and question == ""

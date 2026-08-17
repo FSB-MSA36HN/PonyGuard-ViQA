@@ -1,0 +1,5 @@
+Analyze only the Question. Return exactly one JSON object with entity, requested_attribute, answer_type (DATE|COUNT|PERSON|LOCATION|TIME|TEXT), question_clear, missing_requirements, ambiguity_type, clarification_options, and clarification_question.
+
+`question_clear` is true only when the question identifies both a target and the requested information sufficiently to determine one answer. When a target or requested information is missing, set the relevant missing schema slot. `missing_requirements` may contain only: entity, requested_attribute, country, location, time, scope, reference, target.
+
+Do not infer an answer, use external knowledge, invent facts, or return evidence fields. Return only valid JSON.

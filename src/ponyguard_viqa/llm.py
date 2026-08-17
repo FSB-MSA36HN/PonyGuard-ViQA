@@ -96,7 +96,7 @@ class LocalLLM:
         try:
             return self._extract_json(response.text), response
         except ValueError:
-            repair_prompt = "Sửa nội dung sau thành MỘT JSON object hợp lệ. Không thêm giải thích, markdown hoặc text khác.\n\n" + response.text
+            repair_prompt = "Trả về MỘT JSON object hợp lệ cho yêu cầu gốc sau. Không thêm giải thích, markdown hoặc text khác.\n\nYêu cầu gốc:\n" + prompt + "\n\nOutput không hợp lệ cần thay thế:\n" + response.text
             repair_tokens = max(max_tokens or self.max_tokens, 256)
             repaired = self.generate(repair_prompt, repair_tokens)
             try:
@@ -174,13 +174,14 @@ class GeminiLLM(LocalLLM):
             raise RuntimeError(f"Gemini request failed ({error.code}): {detail[:300]}") from error
         except (URLError, TimeoutError) as error:
             raise ProviderQuotaError(f"Gemini network unavailable: {error}") from error
-        try:
-            parts = payload["candidates"][0]["content"]["parts"]
-            text = "".join(part.get("text", "") for part in parts).strip()
-        except (IndexError, KeyError, TypeError) as error:
-            if payload.get("candidates", [{}])[0].get("finishReason") == "MAX_TOKENS":
-                raise RuntimeError("Gemini exhausted max_output_tokens before returning text; increase the stage token budget.") from error
-            raise RuntimeError(f"Gemini returned no text: {json.dumps(payload)[:300]}") from error
+        candidate = (payload.get("candidates") or [{}])[0]
+        parts = candidate.get("content", {}).get("parts", []) if isinstance(candidate, dict) else []
+        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict)).strip()
+        if not text and isinstance(candidate, dict) and candidate.get("finishReason") == "MAX_TOKENS":
+            # Let LocalLLM.json repair this with its larger structured-output retry instead of crashing the UI.
+            return LLMResponse("", len(prompt.split()), 0, (perf_counter()-started)*1000, provider="gemini", model=model)
+        if not text:
+            raise RuntimeError(f"Gemini returned no text: {json.dumps(payload)[:300]}")
         return LLMResponse(text, len(prompt.split()), len(text.split()), (perf_counter()-started)*1000, provider="gemini", model=model)
 
 

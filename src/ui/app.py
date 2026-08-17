@@ -54,7 +54,7 @@ def available_gemini_models() -> list[str]:
 
 
 @st.cache_resource
-def shared_resources():
+def shared_resources(config_version: int):
     config = load_config("configs/base.yaml")
     retrieval, model = config["retrieval"], config["model"]
     return (
@@ -70,13 +70,13 @@ def selected_llm(selected_model: str):
 
 
 def pipeline(system: str, selected_model: str):
-    retriever, retrieval, model = shared_resources()
+    retriever, retrieval, model = shared_resources(Path("configs/base.yaml").stat().st_mtime_ns)
     llm = selected_llm(selected_model)
-    return (BasicRAG if system == "Basic RAG" else PonyGuard)(retriever, llm, retrieval["top_k"], stage_tokens=model.get("stage_max_tokens"))
+    return BasicRAG(retriever, llm, retrieval["top_k"], stage_tokens=model.get("stage_max_tokens")) if system == "Basic RAG" else PonyGuard(retriever, llm, retrieval["top_k"], stage_tokens=model.get("stage_max_tokens"), intent_first=True)
 
 
-def ask(system: str, selected_model: str, question: str, progress=None) -> dict:
-    result = pipeline(system, selected_model).run({"sample_id": f"demo_{uuid4().hex}", "question": question, "gold_answers": [], "expected_action": "ANSWER"}, progress=progress)
+def ask(system: str, selected_model: str, question: str, clarification_for: list[str] | None = None, progress=None) -> dict:
+    result = pipeline(system, selected_model).run({"sample_id": f"demo_{uuid4().hex}", "question": question, "clarification_for": clarification_for or [], "gold_answers": [], "expected_action": "ANSWER"}, progress=progress)
     Path("runs").mkdir(exist_ok=True)
     with Path("runs/ui_timing.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), "request_id": result["sample_id"], "system": system, "selected_model": selected_model, "prediction": result["prediction"], "trace": result.get("trace", {}), "performance": result["performance"]}, ensure_ascii=False) + "\n")
@@ -84,7 +84,16 @@ def ask(system: str, selected_model: str, question: str, progress=None) -> dict:
 
 
 def empty_chat() -> dict:
-    return {"id": uuid4().hex, "title": "New chat", "messages": [], "pending_question": None}
+    return {"id": uuid4().hex, "title": "New chat", "messages": [], "pending_question": None, "pending_requirements": []}
+
+
+def saved_pending_requirements(chat: dict) -> list[str]:
+    if "pending_requirements" in chat:
+        return chat["pending_requirements"]
+    for message in reversed(chat.get("messages", [])):
+        if message.get("role") == "assistant" and message.get("result", {}).get("prediction", {}).get("decision") == "ASK":
+            return message["result"].get("trace", {}).get("requirements", {}).get("missing_requirements", [])
+    return []
 
 
 def active_chat() -> dict:
@@ -95,6 +104,7 @@ def save_active_chat() -> None:
     chat = active_chat()
     chat["messages"] = st.session_state.messages
     chat["pending_question"] = st.session_state.pending_question
+    chat["pending_requirements"] = st.session_state.pending_requirements
 
 
 def new_chat() -> None:
@@ -104,6 +114,7 @@ def new_chat() -> None:
     st.session_state.active_chat_id = chat["id"]
     st.session_state.messages = []
     st.session_state.pending_question = None
+    st.session_state.pending_requirements = []
     st.rerun()
 
 
@@ -113,6 +124,7 @@ def open_chat(chat_id: str) -> None:
     chat = active_chat()
     st.session_state.messages = chat["messages"]
     st.session_state.pending_question = chat["pending_question"]
+    st.session_state.pending_requirements = saved_pending_requirements(chat)
     st.rerun()
 
 
@@ -126,6 +138,7 @@ def delete_chat(chat_id: str) -> None:
         st.session_state.active_chat_id = chat["id"]
         st.session_state.messages = chat["messages"]
         st.session_state.pending_question = chat["pending_question"]
+        st.session_state.pending_requirements = saved_pending_requirements(chat)
     st.rerun()
 
 
@@ -199,7 +212,10 @@ if "messages" not in st.session_state:
     chat = active_chat()
     st.session_state.messages = chat["messages"]
     st.session_state.pending_question = chat["pending_question"]
+    st.session_state.pending_requirements = saved_pending_requirements(chat)
 st.session_state.setdefault("pending_question", None)
+if "pending_requirements" not in st.session_state:
+    st.session_state.pending_requirements = saved_pending_requirements(active_chat())
 st.session_state.setdefault("composer_nonce", 0)
 
 with st.sidebar:
@@ -270,6 +286,7 @@ with st.bottom:
 prompt = typed_prompt.strip() if submitted and typed_prompt else st.session_state.pop("queued_prompt", None)
 
 if prompt:
+    clarification_for = list(st.session_state.pending_requirements) if pending else []
     displayed = prompt if not pending else f"Clarification: {prompt}"
     st.session_state.messages.append({"role": "user", "content": displayed})
     chat = active_chat()
@@ -277,6 +294,7 @@ if prompt:
         chat["title"] = prompt.strip().replace("\n", " ")[:42] or "New chat"
     question = add_clarification(pending, prompt) if pending else prompt
     st.session_state.pending_question = None
+    st.session_state.pending_requirements = []
     with st.chat_message("assistant", avatar="🤖" if system == "Basic RAG" else "🛡️"):
         with st.status("Starting…", expanded=True) as status:
             def show_progress(stage: str, label: str) -> None:
@@ -284,12 +302,13 @@ if prompt:
                 st.write(f":material/{icons.get(stage, 'progress_activity')}: {label}")
                 status.update(label=label, state="running", expanded=True)
 
-            result = ask(system, selected_model, question, show_progress)
+            result = ask(system, selected_model, question, clarification_for, show_progress)
             status.update(label="Done", state="complete", expanded=False)
     assistant_message = {"role": "assistant", "system": system, "result": result}
     st.session_state.messages.append(assistant_message)
     if result["prediction"]["decision"] == "ASK":
         st.session_state.pending_question = question
+        st.session_state.pending_requirements = result.get("trace", {}).get("requirements", {}).get("missing_requirements", [])
     st.session_state.composer_nonce += 1
     save_active_chat()
     st.rerun()

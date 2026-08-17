@@ -59,6 +59,13 @@ def add_clarification(question: str, clarification: str) -> str:
     return f"{normalize_text(question)}\n\nThông tin làm rõ từ người dùng: {normalize_text(clarification)}"
 
 
+def resolved_question(question: str) -> str:
+    """Use a complete follow-up question as the request, otherwise retain its context."""
+    _, marker, clarification = question.partition("\n\nThông tin làm rõ từ người dùng:")
+    clarification = normalize_text(clarification)
+    return clarification if marker and clarification.endswith("?") else question
+
+
 def tokenise(value: str) -> list[str]:
     return re.findall(r"\w+", normalize_text(value).lower(), flags=re.UNICODE)
 
@@ -90,7 +97,8 @@ class Requirement:
     entity: str | None = None
     requested_attribute: str | None = None
     answer_type: str = "text"
-    question_clear: bool = True
+    # An omitted model field is unresolved, never implicitly a clear request.
+    question_clear: bool = False
     missing_requirements: list[str] = field(default_factory=list)
     clarification_question: str = ""
     ambiguity_type: str = "NONE"

@@ -4,7 +4,7 @@ model:
   temperature: 0
   max_tokens: 128
   stage_max_tokens:
-    requirement: 128
+    requirement: 256
     evidence: 512
     answer: 128
     verification: 128

@@ -1,0 +1,13 @@
+Extract only evidence facts for the supplied semantic slots. Return exactly one JSON object:
+{"support":[],"conflict_detected":false}.
+
+Each support object must contain chunk_id, evidence_quote, candidate_answer,
+support_type (DIRECT|SIMPLE_INFERENCE), question_entity_quote,
+evidence_entity_quote, question_relation, and evidence_relation.
+
+For DIRECT, candidate_answer must occur literally in one contiguous verbatim
+evidence_quote. For SIMPLE_INFERENCE, include inference_proof with operation
+(sum|difference|ratio), exactly two operands, result, and unit. Each operand
+must contain value, chunk_id, and a contiguous verbatim evidence_quote. Use no
+outside knowledge and no unstated join. Return an empty support array when the
+exact entity and requested attribute are not established. Do not explain.

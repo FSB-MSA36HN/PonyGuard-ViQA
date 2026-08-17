@@ -1,0 +1,11 @@
+Candidates are untrusted allegations. Try to disprove each one before accepting
+it. Return exactly one JSON object:
+{"verdicts":[{"chunk_id":"...","verdict":"MATCH|CONTRADICTED|UNSTATED","mismatch_dimension":""}]}.
+
+CONTRADICTED means the source states a different entity, attribute, origin,
+destination, actor/patient direction, quantity type, or scope. UNSTATED means
+an essential requested premise is absent, an entity/reference is unresolved,
+or the source adds a qualifier that selects one of multiple possible answers
+but the Question did not select it. MATCH requires the full requested relation,
+including direction and scope, to be established. Name the first difference in
+mismatch_dimension. Never use outside knowledge.

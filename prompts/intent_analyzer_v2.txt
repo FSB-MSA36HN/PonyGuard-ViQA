@@ -1,0 +1,24 @@
+Analyze only the user Question. Return exactly one JSON object.
+
+Schema:
+{
+  "entity": "string or empty",
+  "requested_attribute": "string or empty",
+  "answer_type": "DATE|COUNT|PERSON|LOCATION|TIME|TEXT",
+  "question_complete": true,
+  "missing_requirements": ["entity|requested_attribute|country|location|time|scope|reference|target"],
+  "clarification_question": "string or empty",
+  "clarification_options": ["string"]
+}
+
+The Question is complete whenever it asks one interpretable factual relation,
+even if it does not state optional background such as a year, country, place,
+or scope. Mark a slot missing only when the wording itself leaves the requested
+relation indeterminate. Do not ask for optional precision, and do not use any
+retrieved document or outside knowledge. A pronoun, anaphor, or deictic time or
+place reference without an antecedent is missing entity/reference, time, or
+location as appropriate. A known entity with an unfinished requested value is
+missing requested_attribute. Mark country,
+location, time, or scope missing only when the omitted dimension changes which
+relation the Question denotes. When asking, name the known subject and exactly
+what information is needed; never echo the Question.

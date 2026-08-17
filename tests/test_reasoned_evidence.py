@@ -50,10 +50,24 @@ def test_string_coverage_gap_is_rendered_as_one_reason_not_characters():
 
 def test_refusal_uses_the_dynamic_adjudicator_reason_and_does_not_claim_corpus_absence():
     requirement = Requirement()
-    evidence = {"valid_supports": [], "clarification_adjudication": {"rationale": "The retrieved sources discuss unrelated topics and do not establish the requested concept."}}
+    evidence = {"valid_supports": [], "clarification_adjudication": {"decision": "ASK", "rationale": "The retrieved sources discuss unrelated topics and do not establish the requested concept."}}
     refusal = PonyGuard.grounded_refusal(requirement, evidence)
     assert refusal["coverage_gaps"][0].startswith("The retrieved sources")
     assert "không khẳng định toàn bộ corpus" in refusal["text"]
+
+
+def test_refusal_ignores_an_ask_rationale_when_the_adjudicator_has_no_missing_slot():
+    refusal = PonyGuard.grounded_refusal(Requirement(), {"valid_supports": [], "clarification_adjudication": {"decision": None, "rationale": "A false ambiguity."}})
+    assert "false ambiguity" not in refusal["text"].lower()
+
+
+def test_rejected_numeric_support_is_shown_as_a_component_not_a_total():
+    chunk = Chunk("counts", "counts_1", "Country A has 3 groups, 12 birds, and 8 mammals.")
+    evidence = {"chunk_id": chunk.chunk_id, "evidence_quote": "Country A has 8 mammals", "candidate_answer": "8", "valid_supports": []}
+    observations = PonyGuard.validated_observations(evidence, [chunk])
+    refusal = PonyGuard.grounded_refusal(Requirement(), {"valid_supports": [], "valid_observations": observations})
+    assert "8 mammals" in refusal["text"]
+    assert "nhiều số liệu riêng" in refusal["text"]
 
 
 def test_refusal_shows_literal_retrieved_observations_when_no_answer_support_exists():

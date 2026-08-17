@@ -40,6 +40,9 @@ Useful checks:
 ```bash
 make verify-data
 make test
+make behavior-test
+# Live development diagnostic: 26 real retrieval + PonyGuard cases; does not touch frozen test.
+make live-behavioral
 # Fast offline integration smoke test after build-index
 .venv/bin/python scripts/evaluate_all.py --input data/benchmark/dev.jsonl --limit 3 --mock
 ```
@@ -53,3 +56,7 @@ All systems share the exact corpus, index, embedding model, top-k, generator mod
 The default comparison provider is Gemini when `GEMINI_API_KEY` is configured; the selected Gemini model and actual per-stage provider are recorded in run metadata. Basic RAG and Prompt-Safe RAG emit a literal cited evidence quote; an invalid quote/citation is withheld instead of being shown as a fact. PonyGuard parses semantic slots (entity, requested attribute, answer type, missing slots) before it can ask a follow-up. Its runtime policy is dynamic and evidence-led; see [PROJECT_POLICY.md](PROJECT_POLICY.md). Tune only on dev/validation; the frozen final test remains untouched.
 
 The demo keeps one shared local model and retriever for both UI systems. Open **Timing theo stage** after a question to distinguish the one-time cold model/index load from normal inference; request timings are appended to `runs/ui_timing.jsonl`.
+
+The deterministic behavioural matrix covers all `ASK` schema slots, direct/simple-inference answers, grounded abstentions, follow-ups, baseline grounding and provider/JSON failure handling. It is documented in [docs/BEHAVIORAL_TEST_MATRIX.md](docs/BEHAVIORAL_TEST_MATRIX.md) and never changes the frozen final benchmark.
+
+The separate live suite is [data/diagnostics/ponyguard_behavioral_live.jsonl](data/diagnostics/ponyguard_behavioral_live.jsonl). It records a per-case live report in `reports/PONYGUARD_LIVE_BEHAVIORAL_REPORT.md`; use it for development diagnosis only, then promote fixed failure classes into deterministic regression tests. The remediation design is in [docs/LIVE_BEHAVIORAL_FIX_PLAN.md](docs/LIVE_BEHAVIORAL_FIX_PLAN.md).

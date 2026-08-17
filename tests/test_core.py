@@ -1,4 +1,4 @@
-from ponyguard_viqa.core import Chunk, Requirement, add_clarification, stable_hash
+from ponyguard_viqa.core import Chunk, Requirement, add_clarification, resolved_question, stable_hash
 from ponyguard_viqa.data import clarification_set, stratified_splits
 from ponyguard_viqa.evaluation import metrics
 from ponyguard_viqa.pipelines import PonyGuard
@@ -31,6 +31,10 @@ def test_stable_hash_changes_with_ids():
 def test_clarification_extends_request_without_claiming_evidence():
     merged = add_clarification("Ông ấy sinh năm bao nhiêu?", "Ông ấy là Albert Einstein.")
     assert merged.startswith("Ông ấy sinh năm bao nhiêu?") and "Thông tin làm rõ từ người dùng" in merged
+
+def test_complete_follow_up_question_replaces_an_incomplete_turn_but_short_context_does_not():
+    assert resolved_question(add_clarification("Con lợn có?", "Con lợn có mấy chân?")) == "Con lợn có mấy chân?"
+    assert "Mỹ" in resolved_question(add_clarification("Quốc khánh là ngày nào?", "Mỹ"))
 
 def test_claim_final_gate_removes_unsupported_or_abstains():
     claims = [{"text": "Đúng.", "label": "SUPPORTED"}, {"text": "Sai.", "label": "UNSUPPORTED"}]
@@ -137,3 +141,13 @@ def test_gemini_uses_json_mime_type_for_structured_requests(monkeypatch):
     monkeypatch.setattr("ponyguard_viqa.llm.urlopen", request)
     GeminiLLM("gemini-test", "key").generate("Return ONLY a JSON object.")
     assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"
+
+
+def test_gemini_max_tokens_without_text_is_repaired_by_the_json_layer(monkeypatch):
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self): return b'{"candidates":[{"finishReason":"MAX_TOKENS"}]}'
+    monkeypatch.setattr("ponyguard_viqa.llm.urlopen", lambda *_args, **_kwargs: Response())
+    response = GeminiLLM("gemini-test", "key").generate("Return ONLY a JSON object.")
+    assert response.text == ""
