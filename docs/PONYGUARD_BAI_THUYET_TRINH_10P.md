@@ -1,221 +1,270 @@
-# PonyGuard-ViQA — Thuyết trình 10 phút (5 người × 2 phút)
+# PonyGuard-ViQA — Kịch bản thuyết trình 10 phút
 
-**Bản dài** (25–30 phút, chi tiết hơn) ở
-[`PONYGUARD_BAI_THUYET_TRINH.md`](PONYGUARD_BAI_THUYET_TRINH.md) — dùng làm tài
-liệu tra cứu khi hỏi đáp.
+**Nhóm 5 người · mỗi người ~2 phút · mỗi người 1 slide**
 
-> **Cách dùng:** phần chữ thường là **lời nói** (đã canh ~2 phút mỗi người).
-> Phần *in nghiêng* là gợi ý slide. Mỗi người **1 slide duy nhất**.
+| # | Phần | Người nói |
+| --- | --- | --- |
+| 1 | Bài toán và động lực (kèm mở bài) | **Đức** |
+| 2 | Mục tiêu và thiết kế thực nghiệm | **Hòa** |
+| 3 | Kiến trúc PonyGuard | **Dương** |
+| 4 | Cách đánh giá và các phát hiện | **Hiệp** |
+| 5 | Kết quả, hạn chế và hướng phát triển | **Hải** |
+
+> **Cách dùng:** chữ thường là **lời nói**. *In nghiêng* là gợi ý slide.
+> `[ngoặc vuông]` là chỉ dẫn sân khấu, không đọc. Bảng trong slide thì **chiếu
+> chứ không đọc** — chỉ nói con số được in đậm.
+>
+> Chuẩn bị + phản biện: [`PONYGUARD_PLAN_AND_QA.md`](PONYGUARD_PLAN_AND_QA.md) ·
+> Chi tiết kỹ thuật: [`PONYGUARD_THUYET_MINH.md`](PONYGUARD_THUYET_MINH.md)
 
 ---
 
-## PHẦN 1 — Vấn đề · P1 · 2 phút
+## PHẦN 1 — Bài toán và động lực
+### Đức · 2 phút
 
-*Slide: câu hỏi + câu trả lời có trích dẫn, đóng dấu đỏ "SAI".*
+*Slide: tên đề tài; dưới là câu hỏi + câu trả lời có citation, đóng dấu đỏ "SAI".*
 
-Tôi bắt đầu bằng một câu hỏi:
+Xin chào thầy cô và các bạn. Nhóm em trình bày đề tài **PonyGuard-ViQA — hệ hỏi
+đáp tiếng Việt biết từ chối trả lời**.
+
+Em là Đức, nói về bài toán. Sau đó Hòa nói thiết kế thực nghiệm, Dương nói kiến
+trúc, Hiệp nói cách đánh giá và các phát hiện, Hải kết bằng kết quả.
+
+`[Vào ví dụ]`
+
+Em bắt đầu bằng một câu hỏi:
 
 > *"Tập đoàn Lend Lease được Làng Olympic xây dựng ở đâu?"*
 
-Tài liệu gốc nói ngược lại: **Lend Lease xây Làng Olympic**. Câu hỏi đã đảo vai
-chủ thể và tân ngữ.
+Tài liệu nói ngược lại: **Lend Lease xây Làng Olympic**. Câu hỏi này đã **đảo chủ
+ngữ với tân ngữ**.
 
-Hệ thống của chúng tôi, ở phiên bản chưa hoàn thiện, trả lời **"Thung lũng Lower
-Lea"** — kèm trích dẫn đúng đoạn văn, trích đoạn nguyên văn không sai một chữ.
+Hệ thống của nhóm em, ở một phiên bản đang phát triển, trả lời **"Thung lũng
+Lower Lea"** — kèm citation đúng chunk, quote nguyên văn không sai một chữ.
 
-Mọi kiểm tra bề mặt đều hợp lệ. Nhưng câu trả lời sai, vì tiền đề của câu hỏi
-sai và hệ thống không nhận ra.
+Thực thể **có** trong nguồn, quote **đúng** nguyên văn, đáp án **nằm trong**
+quote. Mọi ràng buộc mức từ ngữ đều thỏa. Cái sai nằm ở **ai làm gì với ai** —
+thứ mà so khớp chuỗi không nhìn thấy.
 
-Đây là dạng ảo giác nguy hiểm nhất trong RAG: **nó không nghe có vẻ sai**. Nó có
-trích dẫn thật, trong tài liệu thật, văn phong trôi chảy. Người dùng không có lý
-do để nghi ngờ.
+Đây là dạng hallucination nguy hiểm nhất trong RAG, vì **nó không nghe có vẻ
+sai**. Người dùng không có lý do gì để nghi ngờ.
 
-Nguyên nhân gốc rất đơn giản: hệ thống RAG thông thường **luôn trả lời**. Nó
-không có khái niệm "câu này không nên trả lời".
+Nguyên nhân đơn giản: RAG thông thường **luôn trả lời**. Nó không có khái niệm
+"câu này không nên trả lời".
 
-Và trong tra cứu y tế, pháp lý hay chính sách, hai loại lỗi **không ngang nhau**:
+Và trong tra cứu y tế hay pháp lý, hai loại lỗi **không ngang nhau**. Từ chối
+nhầm thì người dùng mất công tra tay — thiệt hại có giới hạn và **nhìn thấy
+được**. Còn trả lời sai kèm citation thì người dùng tin và làm theo — thiệt hại
+không giới hạn và **không ai biết**.
 
-- Từ chối nhầm — người dùng mất công tra thủ công.
-- Trả lời sai kèm trích dẫn — người dùng **tin và hành động theo**.
+Nên mục tiêu của nhóm em không phải accuracy trung bình, mà là: **thà bỏ sót còn
+hơn nói sai**.
 
-Nên chúng tôi không tối ưu độ chính xác trung bình. Chúng tôi tối ưu theo hướng:
-**thà bỏ lỡ còn hơn nói sai**.
-
----
-
-## PHẦN 2 — Mục tiêu và cách so sánh · P2 · 2 phút
-
-*Slide: trái — bảng 3 hành động; phải — 3 hộp hệ thống trên cùng một đáy.*
-
-Chúng tôi định nghĩa lại đầu ra: thay vì luôn sinh câu trả lời, hệ thống phải
-chọn **một trong ba hành động**, và phải đúng **vì đúng lý do**.
-
-| Hành động | Điều kiện |
-| --- | --- |
-| `ANSWER` | Tài liệu **chứng minh được** quan hệ được hỏi, kèm trích dẫn và trích đoạn nguyên văn |
-| `ASK` | **Câu hỏi** thiếu một thành phần ngữ nghĩa bắt buộc |
-| `ABSTAIN` | Câu hỏi rõ, nhưng **bằng chứng** vắng mặt, lệch hoặc không đủ |
-
-Xin nhấn mạnh sự phân biệt giữa hai cái sau: `ASK` là khi **câu hỏi** thiếu,
-`ABSTAIN` là khi **tài liệu** thiếu. Trộn hai cái là sai — hỏi lại người dùng
-không giải quyết được việc corpus không có dữ liệu.
-
-Để đo được đóng góp của cơ chế kiểm chứng, chúng tôi so ba hệ chạy trên **cùng
-corpus, cùng bộ truy xuất, cùng schema đầu ra**:
-
-1. **Basic RAG** — truy xuất rồi trả lời. Đường cơ sở.
-2. **Prompt-Safe RAG** — prompt yêu cầu mô hình tự từ chối khi thiếu bằng chứng.
-   Đại diện cho cách phổ biến nhất hiện nay: dặn dò bằng lời.
-3. **PonyGuard** — kiểm chứng nhiều tầng có cấu trúc.
-
-Giữ mọi thứ khác giống hệt nhau là có chủ đích: nó cô lập đúng biến cần đo.
-
-Và một ràng buộc chúng tôi tự đặt: **không hard-code** bất kỳ thực thể, câu hỏi
-hay đáp án nào. Một câu hỏi quan sát được là một **test case**, không phải một
-luật thêm vào hệ thống.
-
-Dữ liệu: UIT-ViQuAD 2.0, chia đóng băng bằng manifest có hash.
+`[Chuyển]` Đo điều đó thế nào cho khoa học — em mời Hòa.
 
 ---
 
-## PHẦN 3 — Kiến trúc · P3 · 2 phút
+## PHẦN 2 — Mục tiêu và thiết kế thực nghiệm
+### Hòa · 2 phút
 
-*Slide: sơ đồ dọc 5 tầng, tiêu đề lớn "LLM đề xuất — Mã quyết định".*
+*Slide: trái — bảng 3 hành động; phải — 3 hộp hệ thống trên cùng nền
+"Corpus + Retriever + Schema".*
 
-Toàn bộ kiến trúc xoay quanh một nguyên lý:
+Cảm ơn Đức. Em là Hòa.
 
-> **Đẩy quyết định ra khỏi mô hình ngôn ngữ, vào mã tất định.**
+Việc đầu tiên là **định nghĩa lại output**. Thay vì luôn sinh câu trả lời, hệ
+thống chọn **một trong ba hành động**, mỗi hành động gắn với một điều kiện
+**kiểm tra được**: `ANSWER` khi tài liệu chứng minh được, có citation và quote
+nguyên văn. `ASK` khi **câu hỏi** thiếu thông tin. `ABSTAIN` khi **tài liệu**
+thiếu.
 
-Mô hình dùng để **trích xuất** và **đề xuất**. Việc **chấp nhận hay từ chối** do
-mã kiểm tra. Lý do: phán đoán của mô hình không ổn định — cùng một loại lỗi, lúc
-bắt được lúc không. Mã kiểm tra thì luôn cho cùng kết quả. Ta xây phần bảo đảm
-an toàn trên nền tất định.
+Em nhấn mạnh ranh giới giữa `ASK` và `ABSTAIN`, vì đây là quyết định thiết kế
+chứ không phải chi tiết code. Gộp hai cái là sai — hỏi lại người dùng không giúp
+gì khi corpus vốn không có dữ liệu.
 
-Năm tầng:
+`[Sang thiết kế so sánh]`
 
-**Một — phân tích ý định, trước khi truy xuất.** Mô hình phải khai từng slot ngữ
-nghĩa kèm **đoạn trích nguyên văn từ chính câu hỏi** và một trạng thái thuộc tập
-đóng. Rồi **mã** kiểm tra đoạn trích đó có thật trong câu hỏi không và tự tính
-kết luận — mô hình không được tự tuyên bố câu hỏi đã đủ thông tin.
+Để tách riêng đóng góp của cơ chế kiểm tra, nhóm em so **ba hệ** chạy trên **cùng
+corpus, cùng retriever, cùng top-k, cùng schema, cùng model nền**:
 
-Quyết định `ASK` phải đến **trước** khi nhìn tài liệu. Nếu để sau, hệ thống sẽ
-hỏi lại chỉ vì không tìm thấy bằng chứng — mà đó là lý do để từ chối, không phải
-để hỏi.
+**Basic RAG** — retrieve rồi sinh, đây là baseline. **Prompt-Safe RAG** — thêm
+chỉ dẫn bảo model tự từ chối khi thiếu bằng chứng, đại diện cho cách phổ biến
+nhất hiện nay là dặn dò bằng prompt. Và **PonyGuard** — kiểm tra nhiều tầng có
+cấu trúc.
 
-**Hai — trích xuất có ràng buộc:** mỗi bằng chứng phải kèm trích đoạn nguyên văn.
+Vì mọi thứ khác giống hệt nhau, chênh lệch đo được **quy về đúng** biến ta muốn
+đo.
 
-**Ba — xác minh quan hệ:** nguồn có xác lập **đúng quan hệ được hỏi** không?
-Chặn đảo chủ thể, sai thuộc tính, sai phạm vi.
+Nhóm em cũng tự đặt một ràng buộc: **không hard-code** bất kỳ thực thể hay đáp án
+nào. Một câu hỏi quan sát được là một **test case**, không phải một luật nhét vào
+pipeline. Ràng buộc này làm mọi thứ chậm hơn nhiều — và Hiệp sẽ cho thấy nhóm em
+suýt vi phạm nó thế nào.
 
-**Bốn — kiểm chứng tất định trong mã:** trích đoạn phải nguyên văn trong nguồn;
-đáp án phải nằm trong trích đoạn; thực thể phải neo được vào cả hai bên. Qua
-được thì đáp án **trở thành bất biến** — tầng viết câu trả lời chỉ được diễn đạt
-lại, không được thay thế.
+Dữ liệu: UIT-ViQuAD 2.0, split đóng băng verify bằng hash, corpus 5.400 chunk,
+retrieve bằng FAISS, model nền Qwen3-8B chạy local.
 
-**Năm — chứng minh suy luận:** với phép tính, bắt buộc có toán hạng tường minh
-và **tính lại bằng mã**.
-
----
-
-## PHẦN 4 — Hai phát hiện đáng chú ý · P4 · 2 phút
-
-*Slide: chia đôi — trái "Lỗi phạm trù", phải "Overfitting: −1 vs 0".*
-
-**Phát hiện thứ nhất — một lỗi phạm trù của chính chúng tôi.**
-
-Với câu hỏi *"chênh lệch giữa A và B là bao nhiêu?"*, tầng xác minh quan hệ được
-hỏi: *"nguồn có phát biểu quan hệ chênh lệch không?"* — và luôn trả lời không.
-
-Câu trả lời đó **đúng**. Không nguồn nào phát biểu một quan hệ **dẫn xuất** — vì
-nếu có thì nó đã không còn là suy luận. Chúng tôi đã hỏi sai phạm trù. Hậu quả:
-bộ kiểm chứng số học viết hoàn toàn đúng nhưng **không bao giờ chạy tới**.
-
-Cách sửa: bỏ phán đoán về quan hệ tổng hợp, thay bằng kiểm chứng **từng toán
-hạng** cộng **tính lại phép toán trong mã**. Kết quả **an toàn hơn**, không phải
-lỏng hơn — bốn kiểm tra độc lập thay cho một phán đoán của mô hình.
-
-**Phát hiện thứ hai — minh chứng định lượng về overfitting.**
-
-Chúng tôi từng thêm hai luật để xử lý các ca quan sát được. Cả hai viết hoàn
-toàn **tổng quát**, không chứa thực thể nào — nhìn là hợp lệ.
-
-Sau đó chúng tôi viết các **ca phản chứng**, thiết kế riêng để **bác bỏ** chính
-hai luật đó. Cả hai đều sai: chúng nuốt mất những lời hỏi lại chính đáng.
-
-Gỡ bỏ hai luật làm mất **đúng một ca**, và **chỉ trên bộ đã tinh chỉnh**. Bộ
-held-out **không đổi một điểm nào**.
-
-Toàn bộ giá trị của chúng nằm trên chính tập dữ liệu chúng được thiết kế dựa
-theo, và bằng không trên dữ liệu mới.
-
-> Bài học: **một luật viết tổng quát vẫn có thể là fit test**, nếu nó được *chọn*
-> bằng cách nhìn xem nó sửa được ca nào. Không hard-code là cần, nhưng chưa đủ.
+`[Chuyển]` Kiến trúc đó trông thế nào — em mời Dương.
 
 ---
 
-## PHẦN 5 — Kết quả và hạn chế · P5 · 2 phút
+## PHẦN 3 — Kiến trúc PonyGuard
+### Dương · 2 phút
 
-*Slide: bảng so sánh 3 hệ + dòng đỏ "còn 2 câu trả lời sai".*
+*Slide: sơ đồ dọc 5 tầng; tiêu đề lớn "LLM đề xuất — Code quyết định".*
 
-Trên tập test đóng băng, mẫu 200 câu cân bằng:
+Cảm ơn Hòa. Em là Dương.
 
-| Hệ | Trả lời | Từ chối | **Ảo giác** | Bỏ lỡ |
-| --- | ---: | ---: | ---: | ---: |
-| Basic RAG | 83 | 117 | **39** | 59 |
-| Prompt-Safe RAG | 72 | 128 | **31** | 62 |
-| PonyGuard | *(điền)* | | | |
+Cả hệ thống xoay quanh **một nguyên tắc**:
 
-*"Ảo giác" = câu đáng lẽ phải từ chối nhưng vẫn trả lời.*
+> **Đưa quyết định ra khỏi LLM, giao cho code.**
 
-Điểm đáng chú ý nhất: **Prompt-Safe chỉ giảm ảo giác từ 39 xuống 31** — khoảng
-20% — trong khi **bỏ lỡ nhiều hơn**. Nghĩa là dặn dò bằng prompt chỉ làm mô hình
-**rụt rè hơn chứ không chính xác hơn**. Nó từ chối thêm, nhưng phần lớn là từ
-chối nhầm. Đây chính là lý do cần kiểm chứng có cấu trúc.
+LLM dùng để **trích xuất** và **đề xuất**. Việc **chấp nhận hay loại bỏ** thì code
+làm. Lý do: phán đoán của LLM **không ổn định theo cách diễn đạt** — cùng một cặp
+thực thể, đổi cách hỏi thôi là model cho hai kết quả khác nhau. Code thì cùng
+input luôn ra cùng output.
 
-Trên các bộ chẩn đoán: **19/26** trên bộ đã tinh chỉnh, **7/10** trên bộ chưa
-từng thấy, **10/12** trên bộ an toàn. Khoảng cách giữa 19/26 và 7/10 là lý do
-chúng tôi không báo cáo một con số duy nhất.
+`[Đi qua 5 tầng, nhịp nhanh]`
 
-**Và đây là phần chúng tôi chưa làm được.**
+**Tầng 1 — phân tích intent, chạy trước khi retrieve.** Model khai từng thông tin
+trong câu hỏi, kèm **một đoạn copy nguyên văn từ chính câu hỏi** và một nhãn: đã
+rõ, là tham chiếu chưa xác định, hay không có. Rồi **code** kiểm tra đoạn đó có
+thật nằm trong câu hỏi không và **tự tính** kết luận. Model không được tự tuyên
+bố câu hỏi đã đủ thông tin.
 
-Hệ thống **vẫn để lọt hai câu trả lời sai** — trong đó có đúng ví dụ mở đầu bài
-thuyết trình. Cả hai đều kèm trích dẫn hợp lệ và trích đoạn nguyên văn, tức là
-vượt qua **mọi** kiểm tra tất định hiện có. Nên chúng tôi **không coi dự án là
-đã đạt yêu cầu**.
+Vì sao chạy trước khi retrieve? Vì nếu để sau, hệ thống sẽ hỏi lại chỉ vì không
+tìm thấy bằng chứng — mà đó là lý do để **từ chối**, không phải để hỏi.
 
-Nguyên nhân đã khoanh vùng: hai **tầng phán đoán** không đáng tin trên mô hình
-đang dùng, trong khi các tầng trích xuất và kiểm chứng tất định hoạt động tốt.
-Và chúng tôi đã đo: tăng kích thước mô hình **không** giải quyết được — cùng năm
-ca sai trên cả ba mô hình khác nhau.
+**Tầng 2 — trích xuất bằng chứng:** mỗi bằng chứng phải kèm quote nguyên văn,
+không được diễn giải lại.
 
-Tỷ lệ lọt khoảng 30%, và **chập chờn** — cùng cặp thực thể, khác cách diễn đạt,
-lúc chặn được lúc không. Chính tính chập chờn đó gợi ra hướng tiếp theo: **lấy
-mẫu phán đoán nhiều lần và chỉ chấp nhận khi tất cả đồng ý**.
+**Tầng 3 — verify quan hệ**, ba nhãn: khớp, mâu thuẫn, hoặc nguồn không nói. Tầng
+này chặn đảo chủ ngữ tân ngữ, sai thuộc tính, sai mốc thời gian.
 
-> Kết quả có giá trị nhất của dự án không phải con số pass rate, mà là chúng tôi
-> biết **chính xác** cái gì đang chặn mình — và chứng minh được bằng phép đo,
-> thay vì bằng phỏng đoán.
+**Tầng 4 — kiểm tra bằng code.** Đây mới là chỗ ra quyết định thật: bảy bước tuần
+tự, từ chunk được cite có tồn tại không, quote có nguyên văn không, cho tới thực
+thể có khớp **cả** câu hỏi lẫn nguồn không. Qua hết bảy bước thì bộ ba đáp án –
+quote – citation bị **khóa lại**; tầng viết câu chữ phía sau chỉ được diễn đạt
+lại, **không được thay**.
+
+**Tầng 5 — hai nhánh riêng:** một nhánh **tính lại phép toán bằng code** cho câu
+suy luận, và một nhánh **kiểm tra chiều quan hệ** cho ca đảo vai bạn Đức nêu ở
+đầu.
+
+`[Chuyển]` Phần thú vị nhất lại là những gì nhóm em học được **khi nó chạy sai**.
+Em mời Hiệp.
 
 ---
 
-## Checklist trước khi trình bày
+## PHẦN 4 — Cách đánh giá và các phát hiện
+### Hiệp · 2 phút
 
-- [ ] Điền dòng **PonyGuard** ở bảng Phần 5 (lấy từ `reports/final_results.md`).
-- [ ] Mỗi người **một slide**, không quá 6 dòng chữ.
-- [ ] P1 và P5 thống nhất dùng **cùng một ví dụ** (Lend Lease) để khép vòng.
-- [ ] Tổng duyệt một lượt: 10 phút là rất chặt, phải bấm giờ.
+*Slide: trên — 3 hộp Tuned / Held-out / Safety; dưới — chia đôi
+"Hỏi sai câu hỏi" | "Overfitting: −1 vs 0".*
 
-## Nếu bị cắt còn 7 phút
+Cảm ơn Dương. Em là Hiệp.
 
-Cắt theo thứ tự: (1) đoạn 3 hệ thống ở Phần 2 — chỉ nói tên; (2) tầng 2 và 5 ở
-Phần 3; (3) phát hiện thứ nhất ở Phần 4. **Không cắt** Phần 1, bảng số ở Phần 5,
-và phần hạn chế.
+**Về cách đánh giá:** nhóm em tách **ba bộ test** — bộ **tuned** dùng lúc phát
+triển nên luôn lạc quan hơn thực tế, bộ **held-out** chưa từng dùng để chỉnh, và
+bộ **safety** chuyên về đảo quan hệ.
 
-## Câu hỏi hay bị hỏi (bản rút gọn)
+Chi tiết em muốn nhấn: bộ safety **cố ý có ba câu đúng chiều**. Nếu chỉ toàn câu
+cần từ chối, một hệ thống ngu ngốc kiểu **"cứ từ chối hết"** sẽ được điểm tuyệt
+đối.
 
-| Câu hỏi | Trả lời ngắn |
-| --- | --- |
-| Sao không dùng GPT-4/Gemini? | Đã đo: lớp lỗi này **không giảm theo kích thước mô hình** — 5 ca sai trên cả 3 mô hình. Đổi mô hình là giả thuyết chưa được kiểm chứng. |
-| 200 mẫu ít quá không? | Là mẫu con của tập 2000 đóng băng, sai số ~±3.5%. Chúng tôi ghi rõ là mẫu con, không gọi là kết quả cuối. |
-| Sao từ chối nhiều thế? | Chi phí hai loại lỗi không đối xứng. Nhưng bộ an toàn có **3 ca đối chứng đúng chiều** để bảo đảm hệ không suy biến thành "luôn từ chối". |
-| Làm sao biết không phải fit test? | Đó là phát hiện thứ hai: bộ held-out chưa từng dùng để tinh chỉnh, và chúng tôi đã **gỡ luật** khi ca phản chứng cho thấy sai — chấp nhận mất điểm. |
+`[Phát hiện 1]`
+
+**Phát hiện thứ nhất — nhóm em đã hỏi sai câu hỏi.**
+
+Với câu kiểu *"chênh lệch giữa A và B là bao nhiêu?"*, tầng verify nhận được câu
+hỏi: *"nguồn có nói về quan hệ **chênh lệch** không?"* — và luôn trả lời không.
+
+Mà trả lời vậy là **đúng** — không nguồn nào nói ra một quan hệ **được suy ra**,
+nếu nguồn nói rồi thì đâu còn là suy luận. Nhóm em đã hỏi tầng verify một câu mà
+**bản chất nó không thể trả lời khác được**. Hậu quả: bộ kiểm tra số học viết
+đúng nhưng **không bao giờ chạy tới**.
+
+Cách sửa: bỏ hẳn việc verify quan hệ tổng hợp, thay bằng verify **từng số hạng
+một** rồi **tính lại phép toán bằng code**. Cách này **chặt hơn** chứ không lỏng
+hơn — thay một phán đoán của model bằng bốn bước kiểm tra độc lập.
+
+Bài học: **một tầng verify chỉ hoạt động khi ta hỏi nó đúng câu nó trả lời
+được.**
+
+`[Phát hiện 2]`
+
+**Phát hiện thứ hai — bằng chứng định lượng về overfitting.**
+
+Nhóm em từng thêm hai luật để xử lý các ca quan sát được, cả hai viết **hoàn toàn
+tổng quát**, không chứa thực thể nào — đúng ràng buộc "không hard-code".
+
+Sau đó nhóm em viết **test phản chứng** để **bác bỏ** chính hai luật đó. Cả hai
+đều **nuốt mất** những câu đáng lẽ phải hỏi lại.
+
+Gỡ hai luật ra: bộ **tuned mất đúng một câu**, bộ **held-out không đổi một điểm
+nào**. Nghĩa là toàn bộ giá trị của chúng nằm trên chính bộ dữ liệu chúng được
+thiết kế dựa theo, và **bằng không** trên dữ liệu mới.
+
+> Bài học: "không hard-code" là **cần nhưng chưa đủ**. Một luật viết tổng quát
+> vẫn là fit test nếu nó được **chọn** bằng cách xem nó sửa được câu nào.
+
+`[Chuyển]` Kết quả ra sao — em mời Hải.
+
+---
+
+## PHẦN 5 — Kết quả, hạn chế và hướng phát triển
+### Hải · 2 phút 15
+
+*Slide: bảng metric 3 hệ; dưới cùng dòng đỏ "vẫn còn 2 câu trả lời sai".*
+
+Cảm ơn Hiệp. Em là Hải.
+
+Trên test set đóng băng UIT-ViQuAD 2.0, mẫu 200 câu cân bằng:
+
+| Metric | Basic | Prompt-Safe | **PonyGuard** |
+| --- | ---: | ---: | ---: |
+| Trả lời câu không nên trả lời ↓ | 0.402 | 0.320 | **0.134** |
+| Từ chối đúng ↑ | 0.598 | 0.680 | **0.866** |
+| **Precision — trả lời có đúng chỗ không ↑** | 0.530 | 0.569 | **0.705** |
+| Recall ↑ | 0.427 | 0.398 | 0.301 |
+| **Balanced accuracy ↑** | 0.513 | 0.539 | **0.583** |
+| Số lần gọi LLM | 2.17 | 2.27 | 4.03 |
+
+**Thứ nhất — dặn dò bằng prompt gần như không ăn thua.** Prompt-Safe giảm tỷ lệ
+trả lời sai từ 0.402 xuống 0.320, nhưng **bỏ sót nhiều hơn**. Nó nhát hơn chứ
+không tinh hơn.
+
+**Thứ hai — PonyGuard giảm xuống 0.134, tức giảm hai phần ba** so với baseline.
+
+Nhưng có một câu phản biện quan trọng: **liệu nó chỉ đang siết ngưỡng cho an
+toàn thôi?** Câu trả lời nằm ở dòng in đậm giữa bảng. Nếu chỉ nhát hơn một cách
+mù quáng thì **precision sẽ gần như không đổi**. Thực tế nó tăng từ **0.530 lên
+0.705**, và balanced accuracy tăng **0.513 lên 0.583**. Nghĩa là hệ thống đã đi
+**ra khỏi** đường trade-off cũ chứ không trượt dọc theo nó.
+
+`[Chỗ mất recall]`
+
+**Cái giá là có thật, và nhóm em tách được nó ra.** PonyGuard bỏ sót 72 câu, nhưng
+**34 câu là do đáp án không hề có trong chunk nào retrieve được** — giới hạn của
+retriever, chung cho cả ba hệ. Chỉ **38 câu còn lại** mới do tầng kiểm tra quá
+chặt.
+
+Tính theo phần retrieve được: Basic bắt được **81%**, PonyGuard **58%**. Khoảng
+cách đó là mục tiêu cải thiện tiếp theo, rất rõ ràng.
+
+`[Hạn chế]`
+
+**Và đây là phần nhóm em chưa làm được.** Hệ thống **vẫn để lọt hai câu trả lời
+sai** — trong đó có **đúng câu đảo vai mà bạn Đức mở đầu bài này**. Cả hai đều có
+citation hợp lệ, tức là qua được toàn bộ các bước kiểm tra hiện có. Nên nhóm em
+**không coi đề tài là đã đạt mục tiêu**.
+
+Nguyên nhân đã khoanh vùng: hai **tầng phán đoán** chưa đủ tin cậy trên model
+đang dùng. Và **tăng size model không giải quyết được** — cùng năm câu sai trên
+cả ba model 3B, 7B, 8B. Tỷ lệ lọt khoảng 30% và **lúc được lúc không**, nên
+hướng tiếp theo là **hỏi model nhiều lần, chỉ chấp nhận khi tất cả đồng ý**.
+
+> Kết quả đáng giá nhất của đề tài không phải con số, mà là nhóm em biết **chính
+> xác** cái gì đang chặn mình, và chứng minh được bằng **số đo** chứ không phải
+> phỏng đoán.
+
+Nhóm em xin hết. Rất mong nhận được câu hỏi từ thầy cô và các bạn.
