@@ -3,8 +3,8 @@
 ## Summary
 
 - Cases executed: 26/26
-- Passed: 17
-- Failed: 9
+- Passed: 20
+- Failed: 6
 - Missing outputs: 0
 
 ## Per-case results
@@ -17,10 +17,10 @@
 | ANSWER / direct location / paraphrase | ANSWER | ANSWER | PASS | pass |
 | ANSWER / direct count | ANSWER | ANSWER | PASS | pass |
 | ANSWER / direct list / paraphrase | ANSWER | ANSWER | PASS | pass |
-| ANSWER / causal explanation / paraphrase | ANSWER | ABSTAIN | FAIL | action expected ANSWER, got ABSTAIN |
+| ANSWER / causal explanation / paraphrase | ANSWER | ANSWER | PASS | pass |
 | ANSWER / definition | ANSWER | ABSTAIN | FAIL | action expected ANSWER, got ABSTAIN |
 | ANSWER / time | ANSWER | ANSWER | PASS | pass |
-| ANSWER / SIMPLE_INFERENCE / arithmetic | ANSWER | ABSTAIN | FAIL | action expected ANSWER, got ABSTAIN |
+| ANSWER / SIMPLE_INFERENCE / arithmetic | ANSWER | ANSWER | PASS | pass |
 | ABSTAIN / relation reversed | ABSTAIN | ABSTAIN | PASS | pass |
 | ABSTAIN / unsupported premise | ABSTAIN | ABSTAIN | PASS | pass |
 | ABSTAIN / attribute mismatch | ABSTAIN | ABSTAIN | PASS | pass |
@@ -31,7 +31,7 @@
 | ABSTAIN / unsupported intent | ABSTAIN | ABSTAIN | PASS | pass |
 | ASK / missing requested_attribute / terse | ASK | ABSTAIN | FAIL | action expected ASK, got ABSTAIN |
 | ASK / missing entity / pronoun | ASK | ABSTAIN | FAIL | action expected ASK, got ABSTAIN |
-| ASK / missing country | ASK | ABSTAIN | FAIL | action expected ASK, got ABSTAIN |
+| ASK / missing country | ASK | ASK | PASS | pass |
 | ASK / missing reference | ASK | ASK | PASS | pass |
 | ASK / missing target | ASK | ASK | PASS | pass |
 | ASK / missing scope | ASK | ABSTAIN | FAIL | action expected ASK, got ABSTAIN |

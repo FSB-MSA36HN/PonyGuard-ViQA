@@ -20,9 +20,12 @@ test:
 behavior-test:
 	.venv/bin/python -m pytest -q tests/test_behavioral_matrix.py
 live-behavioral:
-	.venv/bin/python scripts/run_system.py ponyguard --input data/diagnostics/ponyguard_behavioral_live.jsonl --output runs/ponyguard/ponyguard_behavioral_live_predictions.jsonl
+	.venv/bin/python scripts/run_system.py ponyguard --input data/diagnostics/ponyguard_behavioral_live.jsonl --output runs/ponyguard/ponyguard_behavioral_live_predictions.jsonl $(if $(MODEL),--model $(MODEL),)
 	.venv/bin/python scripts/report_live_diagnostics.py
+live-holdout:
+	.venv/bin/python scripts/run_system.py ponyguard --input data/diagnostics/ponyguard_holdout_live.jsonl --output runs/ponyguard/ponyguard_holdout_live_predictions.jsonl $(if $(MODEL),--model $(MODEL),)
+	.venv/bin/python scripts/report_live_diagnostics.py --fixture data/diagnostics/ponyguard_holdout_live.jsonl --predictions runs/ponyguard/ponyguard_holdout_live_predictions.jsonl --output reports/PONYGUARD_HOLDOUT_BEHAVIORAL_REPORT.md
 demo:
 	.venv/bin/streamlit run src/ui/app.py --server.fileWatcherType none
 help:
-	@echo "make setup | dataset | verify-data | prepare-data | build-index | evaluate-retrieval | benchmark | test | behavior-test | live-behavioral | demo"
+	@echo "make setup | dataset | verify-data | prepare-data | build-index | evaluate-retrieval | benchmark | test | behavior-test | live-behavioral | live-holdout | demo"

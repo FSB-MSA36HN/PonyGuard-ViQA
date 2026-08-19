@@ -6,7 +6,7 @@ from time import perf_counter
 from pathlib import Path
 from typing import Any, Callable
 
-from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, PonyGuardState, Requirement, answer_matches_quote, normalized_contains, normalize_text, resolved_question, tokenise
+from .core import ANSWER_TYPE_SATISFIES, Action, Chunk, MISSING_REQUIREMENT_SLOTS, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
 from .llm import LocalLLM
 from .retrieval import Retriever
 
@@ -126,7 +126,11 @@ class PonyGuard:
             return None, response
         value["question_clear"] = value.get("question_complete") is True
         requirement = Requirement(**{key: value.get(key) for key in Requirement.__dataclass_fields__ if key in value})
-        return self.apply_clarity_guard(question, self.enforce_requirement_contract(value, requirement)), response
+        # Slot resolution is decided from literal question spans, never from the
+        # model's global completeness judgement.
+        requirement.slot_bindings, span_bound = intent_slot_bindings(question, value.get("slot_bindings"), requirement.answer_type)
+        requirement.missing_requirements = list(dict.fromkeys([*requirement.missing_requirements, *span_bound]))
+        return self.apply_clarity_guard(question, self.enforce_requirement_contract(value, requirement), span_bound), response
 
     def extract_facts(self, question: str, requirement: Requirement, chunks: list[Chunk], timings: dict[str, Any], label: str = "semantic_evidence") -> tuple[dict[str, Any], Any]:
         request = f"{prompt('fact_extractor_v1.txt')}\nQuestion: {question}\nExpected entity: {requirement.entity or ''}\nExpected attribute: {requirement.requested_attribute or ''}\nExpected answer type: {requirement.answer_type}\nChunks:\n{context(chunks)}"
@@ -136,7 +140,9 @@ class PonyGuard:
         raw = self.support_items(evidence)
         if not raw:
             return None
-        candidates = [{key: item.get(key, "") for key in ("chunk_id", "evidence_quote", "candidate_answer")} for item in raw if isinstance(item, dict)][:2]
+        # A composed relation is by construction absent from every source, so a
+        # verdict on it carries no information. Inference is proved arithmetically.
+        candidates = [{key: item.get(key, "") for key in ("chunk_id", "evidence_quote", "candidate_answer")} for item in raw if isinstance(item, dict) and not self.is_inference(item)][:2]
         if not candidates:
             return None
         value, response = _timed_json(self.llm, "relation_verification", f"{prompt('relation_verifier_v1.txt')}\nQuestion: {question}\nExpected entity: {requirement.entity or ''}\nExpected attribute: {requirement.requested_attribute or ''}\nCandidates: {json.dumps(candidates, ensure_ascii=False)}\nChunks:\n{context(chunks)}", self.stage_tokens["requirement"], timings)
@@ -148,6 +154,10 @@ class PonyGuard:
                 item.update({"attribute_match": verdict == "MATCH", "relation_match": verdict == "MATCH", "premise_status": "SUPPORTED" if verdict == "MATCH" else verdict, "mismatch_dimension": result.get("mismatch_dimension", "")})
         evidence["support"] = raw
         return response
+
+    @staticmethod
+    def is_inference(support: dict[str, Any]) -> bool:
+        return str(support.get("support_type", "")).upper() == "SIMPLE_INFERENCE"
 
     @staticmethod
     def support_items(evidence: dict[str, Any]) -> list[dict[str, Any]]:
@@ -171,19 +181,32 @@ class PonyGuard:
         return any((requirement.time_scope == "UNSPECIFIED" or item.get("matches_time") is True) and (requirement.population_scope == "UNSPECIFIED" or item.get("matches_population") is True) for item in supports)
 
     @staticmethod
-    def apply_clarity_guard(question: str, requirement: Requirement) -> Requirement:
-        """Accept only schema slots; the model and evidence decide whether one is missing."""
+    def apply_clarity_guard(question: str, requirement: Requirement, span_bound: Any = ()) -> Requirement:
+        """Accept only schema slots; the model and evidence decide whether one is missing.
+
+        A slot bound to a literal question span is evidence, not allegation, so it
+        survives the guards that exist to contain an unbound malformed contract.
+        """
+        bound = {normalize_text(str(item)).lower() for item in span_bound} & MISSING_REQUIREMENT_SLOTS
         model_missing = [normalize_text(str(item)).lower() for item in requirement.missing_requirements]
         requirement.missing_requirements = list(dict.fromkeys(item for item in model_missing if item in MISSING_REQUIREMENT_SLOTS))
+        alleged = [item for item in requirement.missing_requirements if item not in bound]
         # Multiple alleged gaps alongside an extracted entity+attribute are a
         # malformed intent contract. Defer them to the bounded clarity audit.
-        if len(requirement.missing_requirements) > 2 or (requirement.entity and requirement.requested_attribute and len(requirement.missing_requirements) > 1):
-            requirement.missing_requirements = []
+        if len(alleged) > 2 or (requirement.entity and requirement.requested_attribute and len(alleged) > 1):
+            alleged = []
         # A contract cannot both extract a slot and claim that same slot is absent.
         if requirement.entity and normalized_contains(question, requirement.entity):
-            requirement.missing_requirements = [item for item in requirement.missing_requirements if item != "entity"]
+            alleged = [item for item in alleged if item != "entity"]
         if requirement.requested_attribute:
-            requirement.missing_requirements = [item for item in requirement.missing_requirements if item != "requested_attribute"]
+            alleged = [item for item in alleged if item != "requested_attribute"]
+        # A dimension the question already fixes cannot also be a missing input,
+        # whether the allegation names that slot or its answer-type sibling.
+        resolved = {str(item.get("slot")) for item in requirement.slot_bindings if item.get("status") == "RESOLVED" and item.get("literal")}
+        family = ANSWER_TYPE_SATISFIES.get(str(requirement.answer_type).upper(), frozenset())
+        covered = resolved | family if resolved & family else resolved
+        alleged = [item for item in alleged if item not in covered]
+        requirement.missing_requirements = [item for item in requirement.missing_requirements if item in bound or item in alleged]
         requirement.question_clear = not requirement.missing_requirements
         requirement.ambiguity_type = "MISSING_REQUIREMENT" if requirement.missing_requirements else "NONE"
         requirement.clarification_options = PonyGuard.valid_options(requirement.clarification_options) if requirement.missing_requirements else []
@@ -577,15 +600,18 @@ class PonyGuard:
             if chunk and strict_relation and status == "SUPPORTED" and relation_match is True and not normalized_contains(chunk.text, quote) and normalized_contains(chunk.text, candidate):
                 quote = PonyGuard.source_excerpt_around(chunk.text, candidate)
                 support["evidence_quote"] = quote
+            # A derived relation is stated by no source, so the relation verdict is
+            # uninformative for it. Its proof is validated arithmetically instead.
+            inference = PonyGuard.is_inference(support)
             if not chunk: rejected.append("Support tham chiếu chunk không tồn tại.")
             elif not normalized_contains(chunk.text, quote): rejected.append(f"Quote không nằm trong {chunk.chunk_id}.")
-            elif strict_relation and ("relation_match" not in support or "attribute_match" not in support or "premise_status" not in support): rejected.append(f"Support trong {chunk.chunk_id} thiếu xác minh quan hệ.")
-            elif status != "SUPPORTED": rejected.append(f"Premise của câu hỏi {status.lower()} trong {chunk.chunk_id}.")
-            elif strict_relation and support.get("attribute_match") is not True: rejected.append(f"Thuộc tính trong {chunk.chunk_id} không khớp yêu cầu được hỏi.")
-            elif relation_match is not True: rejected.append(f"Quan hệ trong {chunk.chunk_id} không khớp yêu cầu được hỏi.")
-            elif str(support.get("support_type", "")).upper() == "SIMPLE_INFERENCE" and not PonyGuard.inference_proof_is_valid(support, chunks): rejected.append(f"Inference proof không hợp lệ ở {chunk.chunk_id}.")
-            elif str(support.get("support_type", "")).upper() != "SIMPLE_INFERENCE" and not answer_matches_quote(candidate, quote): rejected.append(f"Candidate answer không khớp quote của {chunk.chunk_id}.")
-            elif question and not PonyGuard.entity_binding_is_literal(question, quote, support, chunk.text, expected_entity): rejected.append(f"Entity trong {chunk.chunk_id} không khớp thực thể được hỏi.")
+            elif not inference and strict_relation and ("relation_match" not in support or "attribute_match" not in support or "premise_status" not in support): rejected.append(f"Support trong {chunk.chunk_id} thiếu xác minh quan hệ.")
+            elif not inference and status != "SUPPORTED": rejected.append(f"Premise của câu hỏi {status.lower()} trong {chunk.chunk_id}.")
+            elif not inference and strict_relation and support.get("attribute_match") is not True: rejected.append(f"Thuộc tính trong {chunk.chunk_id} không khớp yêu cầu được hỏi.")
+            elif not inference and relation_match is not True: rejected.append(f"Quan hệ trong {chunk.chunk_id} không khớp yêu cầu được hỏi.")
+            elif inference and not PonyGuard.inference_proof_is_valid(support, chunks, question): rejected.append(f"Inference proof không hợp lệ ở {chunk.chunk_id}.")
+            elif not inference and not answer_matches_quote(candidate, quote): rejected.append(f"Candidate answer không khớp quote của {chunk.chunk_id}.")
+            elif not inference and question and not PonyGuard.entity_binding_is_literal(question, quote, support, chunk.text, expected_entity): rejected.append(f"Entity trong {chunk.chunk_id} không khớp thực thể được hỏi.")
             elif str(support.get("support_type", "")).upper() not in ("DIRECT", "SIMPLE_INFERENCE"): rejected.append(f"Support type không được phép ở {chunk.chunk_id}.")
             else: valid.append({**support, "chunk_id": chunk.chunk_id, "support_type": str(support["support_type"]).upper()})
         numeric_values = {tuple(re.findall(r"\d+(?:[.,]\d+)*", str(item.get("candidate_answer", "")))) for item in valid if item.get("support_type") == "DIRECT"}
@@ -593,7 +619,13 @@ class PonyGuard:
         return valid, rejected
 
     @staticmethod
-    def inference_proof_is_valid(support: dict[str, Any], chunks: list[Chunk]) -> bool:
+    def inference_proof_is_valid(support: dict[str, Any], chunks: list[Chunk], question: str = "") -> bool:
+        """Prove a derived answer from stated operands instead of trusting a relation verdict.
+
+        Every operand must quote a real chunk literally, state its own value, and
+        be about something the question names; the result is then recomputed here.
+        An unsupported join fails on the operands, not on a model's opinion.
+        """
         proof = support.get("inference_proof")
         if not isinstance(proof, dict) or proof.get("operation") not in {"sum", "difference", "ratio"}:
             return False
@@ -606,6 +638,7 @@ class PonyGuard:
             chunk = next((item for item in chunks if item.chunk_id == operand.get("chunk_id")), None)
             quote, value = str(operand.get("evidence_quote", "")), str(operand.get("value", ""))
             if not chunk or not normalized_contains(chunk.text, quote) or not answer_matches_quote(value, quote): return False
+            if question and not PonyGuard.entity_binding_is_literal(question, quote, support, chunk.text): return False
             parsed = PonyGuard.numeric_value(value)
             if parsed is None: return False
             values.append(parsed)

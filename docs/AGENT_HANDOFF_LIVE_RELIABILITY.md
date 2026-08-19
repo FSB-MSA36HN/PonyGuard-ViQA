@@ -12,8 +12,10 @@ The required behavior is:
 - `ABSTAIN` when the question is clear but the retrieved evidence is absent,
   mismatched, contradictory, or insufficient.
 
-The current problem is **not** unsafe answers. It is severe false abstention:
-the latest live run returned no correct direct answers.
+The current problem is mixed reliability: several direct questions with
+retrieved evidence still false-`ABSTAIN`, four true missing-slot cases are
+false-`ABSTAIN`, and one missing-time case is an unsafe `ANSWER`. Do not claim
+success until that unsafe answer is removed and a new live run confirms it.
 
 ## Non-negotiable policy
 
@@ -46,10 +48,11 @@ Important files:
 | Live runner/report | `scripts/run_system.py`, `scripts/report_live_diagnostics.py` |
 | Existing remediation design | `docs/PONYGUARD_RELIABILITY_FIX_PLAN_V2.md` |
 
-The current production path enables `intent_first: true`. It does one intent
-analysis, retrieval, then semantic evidence extraction; it skips legacy
-clarification adjudication and recovery in this mode to avoid extra latency
-and evidence invention.
+The current production path enables `intent_first: true`. It performs intent
+analysis before retrieval. Clear questions then retrieve, extract evidence,
+verify relations, and may use one bounded recovery/clarification-adjudication
+path when no validated support is found. Valid direct facts are emitted through
+the canonical answer plan without writer/claim calls.
 
 ## What was tested
 
@@ -62,7 +65,7 @@ make test
 make behavior-test
 ```
 
-They last passed at **94 tests** and **28 behavioral tests**, respectively.
+They last passed at **103 tests** and **29 behavioral tests**, respectively.
 Re-run after every code change.
 
 ### Live behavioral test
@@ -90,46 +93,65 @@ It is acceptable to add generic, diverse regression fixtures here.
 
 ## Latest live result (must be the starting evidence)
 
-Report timestamp: 2026-08-15 23:56 local time.
+Report timestamp: **2026-08-16 13:20 +07**.
 
 | Metric | Result |
 | --- | ---: |
 | Executed | 26 / 26 |
-| Passed | 11 / 26 |
-| Failed | 15 / 26 |
-| Correct direct `ANSWER` cases | 0 / 10 |
-| Median latency | 29.1 s |
-| Mean LLM calls | 2.54 |
+| Passed | **17 / 26** |
+| Failed | 9 / 26 |
+| Actions | 7 `ANSWER` / 3 `ASK` / 16 `ABSTAIN` |
+| Grounded `ANSWER` | 7 / 7 valid citation + literal quote |
+| Median latency | 15.55 s |
+| Mean latency | 22.04 s |
+| Mean LLM calls | 4.12 (107 total) |
 
-The result is safe but unusable: direct numeric, person, date, location,
-count, list, causal, definition and time questions all returned `ABSTAIN`.
-The simple arithmetic inference returned `ASK`.
+All eight unsupported/reversed/mismatched safety cases pass as `ABSTAIN`.
+The latest run is **not acceptance-complete** because `live_ask_time` answered
+despite an unresolved time reference.
 
-The cases that mostly pass are relation reversal, wrong subject, unsupported
-premise/event/comparison/intent, and some true missing slots (`reference`,
-`target`, `time`, `location`). This is evidence that safety checks should be
-retained, not deleted.
-
-Gemini was temporarily unavailable (`429`) on the live run. The run therefore
-used `Qwen/Qwen3-8B-MLX-4bit` as fallback. Do not call this a Gemini result.
-Provider/model must remain visible in reports.
+Gemini was temporarily unavailable (`429`) on the live run. All 100 LLM stage
+calls therefore used local `Qwen/Qwen3-8B-MLX-4bit`. Do not call this a Gemini
+result. Provider/model and fallback reason must remain visible in reports.
 
 ## Confirmed root causes
 
-1. **Entity/relation acceptance is too brittle.** The local model often emits
-   an imperfect semantic entity span even when it selected a literal quote
-   containing the right fact. The strict exact-span validator rejects those
-   supports, causing false `ABSTAIN`.
-2. **The intent model still fabricates optional missing slots.** It marks clear
-   questions as missing country/location/time/scope, causing false `ASK`; it
-   also misses genuine terse attributes, causing false `ABSTAIN`.
-3. **The semantic prompt is still overloaded for the fallback model.** It
-   must parse intent/evidence/relation/explanation JSON and frequently returns
-   incomplete or unhelpful fields.
-4. **The fallback provider is the actual quality and latency bottleneck.** It
-   makes two local LLM calls on many clear requests; semantic evidence alone
-   is commonly about 20 seconds. Retrieval is normally much smaller after
-   warm-up.
+1. **`live_answer_person`: retrieval miss.** The source containing the full
+   answer is outside the bounded retrieved set (approximately rank 15); the
+   selected chunk supports a different, partial allegation. This is not a
+   validator-relaxation candidate.
+2. **`live_answer_reason` and `live_simple_inference`: relation rejection.**
+   Their expected source is in top-1, but the local verifier labels a causal
+   relation / arithmetic operands `CONTRADICTED` before the valid proof path
+   can accept it.
+3. **`live_answer_definition`: evidence extraction miss.** Retrieval occurs
+   after a malformed missing-slot flood is deferred, but extraction/recovery
+   produces no support.
+4. **`live_ask_attribute`, `live_ask_entity`, `live_ask_country`, and
+   `live_ask_scope`: intent/clarity misses.** They proceed to retrieval with
+   no missing requirements and finish `ABSTAIN`.
+5. **`live_ask_time`: unsafe intent miss.** The unresolved time reference is
+   not marked missing, then a retrieved fact is accepted as `ANSWER`.
+6. **Fallback provider remains the quality and latency bottleneck.** Mean
+   local-stage work is 4.12 calls per question; retrieval is normally much
+   smaller after warm-up.
+
+## Changes already retained
+
+- The clarity guard treats a large, internally inconsistent missing-slot set
+  as malformed rather than immediately emitting an ungrounded `ASK`.
+- A relation-verified support with a literal candidate answer can repair a
+  nonliteral model quote to a literal source excerpt. This preserves the
+  citation contract; it does not relax relation verification.
+- Regression coverage was added for both contracts. `make test` is 103 passed
+  and `make behavior-test` is 29 passed.
+
+## Rejected experiment (do not reintroduce without new evidence)
+
+An expanded recovery query (`top_k * 3`) and broad intent/relation prompt
+rewrite caused a **14/26** live run and introduced unsafe `ANSWER`s for an
+unsupported comparison and missing country. It was fully rolled back. The
+current 17/26 result is the verified baseline after that rollback.
 
 Do **not** conclude that retrieval is wrong until checking whether the
 expected source chunk is in top-k. A source in top-k plus no validated support
@@ -151,7 +173,8 @@ editing:
    `claim_gate_failure`, or `provider_format_failure`.
 
 Do not modify a prompt or validator until this chain is known for at least one
-failing direct-answer case and one failing missing-slot case.
+failing direct-answer case and one failing missing-slot case. Re-inspect the
+current row before editing because local fallback output can vary across runs.
 
 ## Improvement order
 
@@ -225,9 +248,10 @@ Before claiming a fix:
 
 ## Suggested first task
 
-Read the newest live predictions, choose one direct-answer false abstention
-whose expected source is retrieved and one missing-slot false abstention.
-Trace both through `PonyGuard.run()` and shared validators. Implement the
-smallest shared schema/validator correction that fixes the class, add a
-deterministic regression test, then repeat the complete live suite. Do not
-attempt a broad prompt rewrite before that evidence is collected.
+Start with `live_ask_time` and one of `live_ask_attribute` /
+`live_ask_entity`: trace intent output and clarity-adjudication output before
+changing a prompt. The first fix must make `ASK` depend on a schema-bound
+missing slot, not a language-specific pattern. Then separately trace
+`live_simple_inference` through relation verification and deterministic proof
+validation. Do not broaden retrieval or weaken `MATCH` requirements merely to
+recover `live_answer_person`.

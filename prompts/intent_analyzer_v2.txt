@@ -7,9 +7,19 @@ Schema:
   "answer_type": "DATE|COUNT|PERSON|LOCATION|TIME|TEXT",
   "question_complete": true,
   "missing_requirements": ["entity|requested_attribute|country|location|time|scope|reference|target"],
+  "slot_bindings": [{"slot": "entity|requested_attribute|country|location|time|scope|reference|target", "span": "string copied verbatim from the Question, or empty", "status": "RESOLVED|REFERENTIAL|ABSENT"}],
   "clarification_question": "string or empty",
   "clarification_options": ["string"]
 }
+
+Emit one slot_bindings entry per slot the Question could constrain, always
+including entity and requested_attribute. The span must be copied character for
+character from the Question; never paraphrase, reorder or translate it. Use
+RESOLVED when that span fixes the dimension from the Question alone, ABSENT
+when the Question states no such dimension and span is empty, and REFERENTIAL
+when the span points outside the Question and needs an antecedent the Question
+does not supply. ABSENT is the normal, correct status for a dimension the
+Question simply does not constrain; it is not a defect.
 
 The Question is complete whenever it asks one interpretable factual relation,
 even if it does not state optional background such as a year, country, place,

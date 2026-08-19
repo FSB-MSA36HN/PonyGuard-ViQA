@@ -11,6 +11,11 @@ import yaml
 
 Action = Literal["ANSWER", "ASK", "ABSTAIN"]
 MISSING_REQUIREMENT_SLOTS = frozenset({"entity", "requested_attribute", "country", "location", "time", "scope", "reference", "target"})
+REQUIRED_REQUIREMENT_SLOTS = frozenset({"entity", "requested_attribute"})
+SLOT_RESOLUTIONS = frozenset({"RESOLVED", "REFERENTIAL", "ABSENT"})
+# The dimension an interrogative asks for is the requested value, never a missing
+# input. Derived from the answer-type enum, so it holds for any question wording.
+ANSWER_TYPE_SATISFIES = {"TIME": frozenset({"time"}), "DATE": frozenset({"time"}), "LOCATION": frozenset({"location", "country"})}
 
 
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
@@ -66,6 +71,39 @@ def resolved_question(question: str) -> str:
     return clarification if marker and clarification.endswith("?") else question
 
 
+def intent_slot_bindings(question: str, raw: Any, answer_type: str = "") -> tuple[list[dict[str, Any]], list[str]]:
+    """Bind each claimed slot to a literal question span, then decide resolution locally.
+
+    A slot counts as unresolved only when the model quotes the question verbatim
+    and labels that span referential, or declares a required slot absent. Any
+    malformed, non-literal or optional-`ABSENT` binding is ignored, so a bad
+    contract can never manufacture a clarification for a clear question. A slot
+    the answer type shows the question is asking for is likewise never missing:
+    an interrogative states the requested value, it does not reference one.
+    """
+    requested = ANSWER_TYPE_SATISFIES.get(normalize_text(str(answer_type)).upper(), frozenset())
+    bindings: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        slot = normalize_text(str(item.get("slot", ""))).lower()
+        status = normalize_text(str(item.get("status", ""))).upper()
+        span = normalize_text(str(item.get("span", "")))
+        if slot not in MISSING_REQUIREMENT_SLOTS or status not in SLOT_RESOLUTIONS:
+            continue
+        literal = bool(span) and normalized_contains(question, span)
+        interrogative = slot in requested
+        binding = {"slot": slot, "span": span, "status": status, "literal": literal, "interrogative": interrogative}
+        if binding not in bindings:
+            bindings.append(binding)
+        if interrogative:
+            continue
+        if (status == "REFERENTIAL" and literal) or (status == "ABSENT" and slot in REQUIRED_REQUIREMENT_SLOTS):
+            unresolved.append(slot)
+    return bindings, list(dict.fromkeys(unresolved))
+
+
 def tokenise(value: str) -> list[str]:
     return re.findall(r"\w+", normalize_text(value).lower(), flags=re.UNICODE)
 
@@ -106,6 +144,7 @@ class Requirement:
     population_scope: str = "UNSPECIFIED"
     time_scope: str = "UNSPECIFIED"
     inclusion_constraints: list[str] = field(default_factory=list)
+    slot_bindings: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
