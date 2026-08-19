@@ -3,8 +3,8 @@
 ## Summary
 
 - Cases executed: 26/26
-- Passed: 20
-- Failed: 6
+- Passed: 19
+- Failed: 7
 - Missing outputs: 0
 
 ## Per-case results
@@ -16,7 +16,7 @@
 | ANSWER / direct date / paraphrase | ANSWER | ANSWER | PASS | pass |
 | ANSWER / direct location / paraphrase | ANSWER | ANSWER | PASS | pass |
 | ANSWER / direct count | ANSWER | ANSWER | PASS | pass |
-| ANSWER / direct list / paraphrase | ANSWER | ANSWER | PASS | pass |
+| ANSWER / direct list / paraphrase | ANSWER | ASK | FAIL | action expected ANSWER, got ASK |
 | ANSWER / causal explanation / paraphrase | ANSWER | ANSWER | PASS | pass |
 | ANSWER / definition | ANSWER | ABSTAIN | FAIL | action expected ANSWER, got ABSTAIN |
 | ANSWER / time | ANSWER | ANSWER | PASS | pass |

@@ -3,8 +3,8 @@
 ## Summary
 
 - Cases executed: 10/10
-- Passed: 5
-- Failed: 5
+- Passed: 6
+- Failed: 4
 - Missing outputs: 0
 
 ## Per-case results
@@ -18,7 +18,7 @@
 | ANSWER / clear LOCATION question must not become ASK | ANSWER | ANSWER | PASS | pass |
 | ANSWER / clear DATE question must not become ASK | ANSWER | ANSWER | PASS | pass |
 | ANSWER / SIMPLE_INFERENCE with operands in two different chunks | ANSWER | ANSWER | FAIL | answer F1 0.00 < 0.80 |
-| ABSTAIN / reversed actor and patient | ABSTAIN | ANSWER | FAIL | action expected ABSTAIN, got ANSWER |
+| ABSTAIN / reversed actor and patient | ABSTAIN | ABSTAIN | PASS | pass |
 | ABSTAIN / unsupported premise | ABSTAIN | ABSTAIN | PASS | pass |
 | ABSTAIN / unsupported numeric join must not pass the proof path | ABSTAIN | ASK | FAIL | action expected ABSTAIN, got ASK |
 

@@ -174,16 +174,40 @@ def test_intent_stays_clear_when_every_optional_dimension_is_absent():
 
 
 def test_a_resolved_dimension_cannot_also_be_alleged_missing():
-    """A question that fixes its place does not need a clarification about that place."""
+    """A contract may not resolve a slot and allege that same slot missing."""
     requirement = PonyGuard.apply_clarity_guard(
         "Những bệnh viện lớn nào ở Hà Nội đang quá tải?",
         Requirement(
             entity="bệnh viện", requested_attribute="tên", answer_type="LOCATION",
-            missing_requirements=["country"],
+            missing_requirements=["location"],
             slot_bindings=[{"slot": "location", "span": "ở Hà Nội", "status": "RESOLVED", "literal": True}],
         ),
     )
     assert requirement.question_clear and not requirement.missing_requirements
+
+
+def test_a_resolved_place_does_not_silence_a_jurisdiction_allegation():
+    """Falsifier that the earlier family rule failed: a named place is not a jurisdiction."""
+    requirement = PonyGuard.apply_clarity_guard(
+        "Thành phố Springfield nằm ở bang nào?",
+        Requirement(
+            entity="Springfield", requested_attribute="bang", answer_type="LOCATION",
+            missing_requirements=["country"],
+            slot_bindings=[{"slot": "location", "span": "Springfield", "status": "RESOLVED", "literal": True}],
+        ),
+    )
+    assert requirement.missing_requirements == ["country"]
+
+
+def test_a_referential_sibling_dimension_survives_the_interrogative_guard():
+    """Falsifier: a LOCATION question can still be missing its jurisdiction."""
+    _, unresolved = intent_slot_bindings("Thủ đô của nước đó nằm ở đâu?", [
+        binding("entity", "Thủ đô", "RESOLVED"),
+        binding("requested_attribute", "nằm ở đâu", "RESOLVED"),
+        binding("location", "ở đâu", "REFERENTIAL"),
+        binding("country", "nước đó", "REFERENTIAL"),
+    ], answer_type="LOCATION")
+    assert unresolved == ["country"]
 
 
 def test_an_unresolved_dimension_is_still_alleged_when_nothing_binds_it():
@@ -204,3 +228,28 @@ def test_a_resolved_sibling_of_a_different_answer_type_does_not_cover_the_allega
         ),
     )
     assert requirement.missing_requirements == ["location"]
+
+
+def test_intent_first_path_spends_no_call_on_a_question_only_audit():
+    """S0: intent owns ASK on its own path, so the question-only audit is redundant."""
+    from ponyguard_viqa.core import Chunk
+
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return [Chunk("d", "d_1", "Một đoạn nguồn không liên quan tới câu hỏi.")]
+
+    class LLM:
+        def __init__(self): self.prompts = []
+        def json(self, request, *_):
+            self.prompts.append(request)
+            return {"entity": "một thực thể", "requested_attribute": "một thuộc tính", "answer_type": "TEXT",
+                    "question_complete": True, "missing_requirements": [], "support": []}, LLMResponse("{}", 1, 1, 1)
+        def generate(self, *_): return LLMResponse("", 1, 1, 1)
+
+    llm = LLM()
+    result = PonyGuard(Retriever(), llm, intent_first=True).run(
+        {"sample_id": "no-audit", "question": "Một thực thể có thuộc tính gì?", "gold_answers": [], "expected_action": "ABSTAIN"}
+    )
+    assert result["prediction"]["decision"] == "ABSTAIN"
+    assert "clarification_adjudication" not in result["performance"]["stages"]
+    assert not any("clarity_auditor" in p or "Audit only whether" in p for p in llm.prompts)

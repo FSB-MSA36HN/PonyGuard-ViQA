@@ -1,0 +1,17 @@
+Extract the direction of one relation. Return exactly one JSON object:
+{"question":{"subject":"","relation":"","object":""},
+ "source":{"subject":"","relation":"","object":""}}
+
+For "question", copy spans verbatim from the Question. The subject is the entity
+the Question presents as performing or owning the relation; the object is what
+the Question asks for, or the entity the relation is applied to. Use the
+interrogative word itself as the object when the Question asks for it.
+
+For "source", copy spans verbatim from the Evidence quote, describing the same
+relation as the source actually states it, with the source's own subject and
+object.
+
+Do not normalise, reorder or translate any span. Do not correct the Question. If
+the source states the relation with the two participants in the opposite roles
+from the Question, report it that way rather than aligning them. Never use
+outside knowledge.

@@ -447,6 +447,74 @@ This is the second time in this work that silent provider fallback produced a
 misleading result. Any measurement that names a provider must record which
 provider actually served the call.
 
+### Phase 1b — Qwen scaling probe, and the ambiguity hypothesis
+
+**Scaling is flat.** Intent measured on three local models over all 36 fixtures:
+
+| Model | intent |
+| --- | ---: |
+| `Qwen2.5-3B-Instruct-4bit` | 23/36 |
+| `Qwen2.5-7B-Instruct-4bit` | 23/36 |
+| `Qwen3-8B-MLX-4bit` (production) | 29/36 |
+
+3B → 7B is flat; 7B → 8B is a generation change, not a size change. More
+importantly, **five cases fail on all three models**: `live_ask_attribute`,
+`live_ask_scope`, `live_ask_time`, `hold_ask_location_missing_country`,
+`hold_ask_location_family_country`. The score differences come from other cases
+fluctuating; this core is invariant.
+
+**This weakens Phase 2 substantially.** The blocking failures are not
+size-limited, so a stronger provider is unlikely to fix them. Measured without
+any Gemini quota.
+
+#### Hypothesis: the ambiguity is only visible in evidence
+
+All five invariant failures are syntactically complete questions whose *referent*
+is underdetermined. That is undetectable from the question alone, but visible in
+retrieval — and `intent_first: true` moved the `ASK` decision before retrieval,
+where the auditor receives no chunks at all
+([`pipelines.py`](../src/ponyguard_viqa/pipelines.py) audit prompt selection).
+An existing test even names the old behaviour:
+`test_country_dependent_question_asks_after_evidence_shows_multiple_countries`.
+
+#### Verification — signal confirmed, implementation path refuted
+
+Reading the recorded chunks, the signal is real and it discriminates:
+
+| Case | Retrieved chunks |
+| --- | --- |
+| `live_ask_time` | 53 nghìn (1954), 132.145 (1940s), 8.215.000 — all validly "dân số Hà Nội", differing by time |
+| `live_ask_entity` | Kepler 1571, Newton 1642, Marx 1818, Jackson 1958 — all validly "sinh năm", differing by person |
+| `hold_ask_location_missing_country` | Hà Nội (Việt Nam) and Roma (Ý) — both validly "thủ đô nằm ở đâu" |
+| **controls** (`live_answer_location`, `hold_answer_location_clear`, `hold_answer_date_clear`) | many numbers and places present, but **exactly one** chunk states the requested relation |
+
+So the discriminator is not "many numbers in context" — controls have those too —
+it is **how many chunks independently yield a valid support for the requested
+relation**.
+
+**But the pipeline destroys that signal before any decision point.** Counting
+`valid_supports` across all 36 recorded cases: every case has **0 or 1**. Never
+two. The extractor is asked to find *the* answer, `verify_relations` caps
+candidates at `[:2]`, and multiplicity is collapsed at extraction.
+
+A rule of the form "≥2 differing valid supports → `ASK`" would therefore fire on
+**zero** cases today. The cheap version — reusing `conflict_detected` — is dead.
+
+Two of the five are refuted outright regardless: `live_ask_attribute` and
+`live_ask_scope` retrieve **no relevant chunk at all** (no giraffe content; no
+chunk stating a count of operations). There is no multiplicity to detect, only
+absence, so they are indistinguishable from a genuine unsupported question.
+
+#### Standing conclusion
+
+- Signal: **real and discriminating**, for roughly three of the six cases.
+- Implementation as proposed: **not viable** — the value never reaches a decision.
+- To exploit it, extraction must enumerate one candidate **per chunk** that
+  supports the relation, instead of selecting a single best. That is a genuine
+  architectural change with token and latency cost, not a guard.
+- Do not implement on the strength of this note alone. The per-chunk enumeration
+  cost and its effect on the eight safety fixtures must be measured first.
+
 ### Phase 2 — Route the intent stage by capability
 
 Justified only if Phase 1 shows a provider that clears the four cases.

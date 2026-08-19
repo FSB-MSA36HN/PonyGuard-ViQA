@@ -115,6 +115,7 @@ def test_intent_first_recovers_one_fact_after_initial_extraction_failure():
         {"_parse_error": True},
         {"support": [{"chunk_id": "source", "evidence_quote": source.text, "candidate_answer": "5", "support_type": "DIRECT"}]},
         {"verdicts": [{"chunk_id": "source", "verdict": "MATCH"}]},
+        {"question": {"subject": "Subject"}, "source": {"subject": "Subject", "object": "verified value of 5"}},
     ])
     result = PonyGuard(Retriever([source]), llm, intent_first=True).run({"sample_id": "recovery", "question": "What is Subject's verified value?", "gold_answers": ["5"], "expected_action": "ANSWER"})
     assert result["prediction"]["decision"] == "ANSWER"

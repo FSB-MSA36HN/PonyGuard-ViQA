@@ -26,7 +26,7 @@ def main():
     output = args.output or f"runs/{args.system}/{Path(args.input).stem}_predictions.jsonl"
     predictions = [pipeline.run(row) for row in rows]
     write_jsonl(output, predictions)
-    metadata = {"config": config, "sample_ids_sha256": stable_hash([row["sample_id"] for row in rows]), "prompt_versions": ["basic_rag_v3", "prompt_safe_rag_v3", "semantic_evidence_v5", "fact_extractor_v1", "requirement_recovery_v1", "evidence_recovery_v1", "clarification_adjudicator_v3", "clarity_auditor_v1", "clarification_writer_v2", "claim_verifier_v2"], "pinned_model": args.model or "", "policy_version": config.get("ponyguard", {}).get("policy_version", "grounded_baseline_v1"), "grounding_validator": "literal_quote_entity_relation_binding_v3", "index": json.loads(Path("artifacts/index/metadata.json").read_text())}
+    metadata = {"config": config, "sample_ids_sha256": stable_hash([row["sample_id"] for row in rows]), "prompt_versions": ["basic_rag_v3", "prompt_safe_rag_v3", "semantic_evidence_v5", "fact_extractor_v1", "requirement_recovery_v1", "evidence_recovery_v1", "clarification_adjudicator_v3", "clarification_writer_v2", "claim_verifier_v2"], "pinned_model": args.model or "", "policy_version": config.get("ponyguard", {}).get("policy_version", "grounded_baseline_v1"), "grounding_validator": "literal_quote_entity_relation_binding_v3", "index": json.loads(Path("artifacts/index/metadata.json").read_text())}
     Path(output).with_suffix(".metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
     print(output)
 

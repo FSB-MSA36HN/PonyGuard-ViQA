@@ -6,7 +6,7 @@ from time import perf_counter
 from pathlib import Path
 from typing import Any, Callable
 
-from .core import ANSWER_TYPE_SATISFIES, Action, Chunk, MISSING_REQUIREMENT_SLOTS, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
+from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
 from .llm import LocalLLM
 from .retrieval import Retriever
 
@@ -156,6 +156,38 @@ class PonyGuard:
         return response
 
     @staticmethod
+    def span_overlap(left: str, right: str) -> float:
+        """Literal token overlap, normalised by the shorter span."""
+        first = {term for term in tokenise(left) if len(term) > 2}
+        second = {term for term in tokenise(right) if len(term) > 2}
+        if not first or not second:
+            return 0.0
+        return len(first & second) / min(len(first), len(second))
+
+    def direction_matches(self, question: str, support: dict[str, Any], timings: dict[str, Any]) -> tuple[bool, Any | None]:
+        """Reject a support whose relation the source states with the roles swapped.
+
+        A reversed actor/patient survives every deterministic check — the entity is
+        in both texts, the quote is literal, the answer sits inside the quote — and
+        the relation verifier has been measured returning MATCH on it. Comparing
+        which side of the source relation the question's subject lands on is
+        decided here in Python, from literal spans.
+        """
+        quote = str(support.get("evidence_quote", ""))
+        if not quote:
+            return True, None
+        value, response = _timed_json(self.llm, "relation_direction", f"{prompt('relation_direction_v1.txt')}\nQuestion: {question}\nEvidence quote: {quote}", self.stage_tokens["requirement"], timings)
+        asked, source = value.get("question"), value.get("source")
+        if not isinstance(asked, dict) or not isinstance(source, dict):
+            return True, response
+        subject = str(asked.get("subject", ""))
+        if not subject:
+            return True, response
+        # Only a strictly better match against the source's object is evidence of
+        # a swap; a tie or missing span leaves the support alone.
+        return PonyGuard.span_overlap(subject, str(source.get("object", ""))) <= PonyGuard.span_overlap(subject, str(source.get("subject", ""))), response
+
+    @staticmethod
     def is_inference(support: dict[str, Any]) -> bool:
         return str(support.get("support_type", "")).upper() == "SIMPLE_INFERENCE"
 
@@ -200,12 +232,11 @@ class PonyGuard:
             alleged = [item for item in alleged if item != "entity"]
         if requirement.requested_attribute:
             alleged = [item for item in alleged if item != "requested_attribute"]
-        # A dimension the question already fixes cannot also be a missing input,
-        # whether the allegation names that slot or its answer-type sibling.
+        # A contract cannot resolve a dimension and allege the same one missing.
+        # Only that exact slot: a resolved place does not settle which jurisdiction
+        # was meant, so it must not silence a jurisdiction allegation.
         resolved = {str(item.get("slot")) for item in requirement.slot_bindings if item.get("status") == "RESOLVED" and item.get("literal")}
-        family = ANSWER_TYPE_SATISFIES.get(str(requirement.answer_type).upper(), frozenset())
-        covered = resolved | family if resolved & family else resolved
-        alleged = [item for item in alleged if item not in covered]
+        alleged = [item for item in alleged if item not in resolved]
         requirement.missing_requirements = [item for item in requirement.missing_requirements if item in bound or item in alleged]
         requirement.question_clear = not requirement.missing_requirements
         requirement.ambiguity_type = "MISSING_REQUIREMENT" if requirement.missing_requirements else "NONE"
@@ -485,9 +516,13 @@ class PonyGuard:
                 supports = recovered_supports
                 level = "SIMPLE_INFERENCE" if any(item.get("support_type") == "SIMPLE_INFERENCE" for item in supports) else "DIRECT"
                 evidence_json.update({"valid_supports": supports, "entity_match": True, "attribute_match": True, "inference_level": level, "reasoning_allowed": True, "answerable_from_evidence": True, "evidence_sufficient": True})
-        if not requirement.missing_requirements and not supports and not resolved_follow_up and (self.intent_first or not evidence_json.get("_parse_error")):
+        # Intent owns the ASK decision on its own path, so the question-only audit
+        # there is redundant: it ran on 16 of 36 diagnostic questions and returned
+        # no decision on any of them. The evidence-backed adjudicator is retained
+        # for the path where intent does not run first.
+        if not self.intent_first and not requirement.missing_requirements and not supports and not resolved_follow_up and not evidence_json.get("_parse_error"):
             report(progress, "understand", "Deciding whether clarification is needed")
-            audit_prompt = f"{prompt('clarity_auditor_v1.txt')}\nQuestion: {sample['question']}\nExtracted entity: {requirement.entity or ''}\nExtracted attribute: {requirement.requested_attribute or ''}" if self.intent_first else f"{prompt('clarification_adjudicator_v3.txt')}\nQuestion: {sample['question']}\nChunks:\n{context(chunks)}"
+            audit_prompt = f"{prompt('clarification_adjudicator_v3.txt')}\nQuestion: {sample['question']}\nChunks:\n{context(chunks)}"
             audit_json, response = _timed_json(self.llm, "clarification_adjudication", audit_prompt, self.stage_tokens["requirement"], timings); stats.append(response)
             audit_requirement = self.apply_user_clarification(sample["question"], self.apply_clarity_guard(sample["question"], Requirement(**{key: audit_json.get(key) for key in Requirement.__dataclass_fields__ if key in audit_json})), clarified_slots)
             audit_accepted = audit_json.get("decision") == "ASK" and bool(audit_requirement.missing_requirements)
@@ -519,6 +554,23 @@ class PonyGuard:
         state.requirements = requirement.__dict__
         state.evidence = evidence_json; state.reasoning = {"level": evidence_json.get("inference_level"), "allowed": evidence_json.get("reasoning_allowed")}
         decision = self.decide(requirement, evidence_json) if self.enabled["requirement"] and self.enabled["inference"] else ("ANSWER" if evidence_json.get("evidence_sufficient") else "ABSTAIN")
+        # One directional check, only on the branch that is about to answer.
+        if decision == "ANSWER" and self.intent_first:
+            report(progress, "verify", "Checking relation direction")
+            kept = []
+            for item in supports:
+                if self.is_inference(item):
+                    kept.append(item); continue
+                aligned, response = self.direction_matches(sample["question"], item, timings)
+                if response is not None: stats.append(response)
+                if aligned: kept.append(item)
+                else: evidence_json.setdefault("support_rejections", []).append(f"Hướng quan hệ trong {item.get('chunk_id')} ngược với câu hỏi.")
+            if not kept:
+                supports, decision = [], "ABSTAIN"
+                evidence_json.update({"valid_supports": [], "answerable_from_evidence": False, "evidence_sufficient": False})
+            else:
+                supports = kept
+                evidence_json["valid_supports"] = kept
         if decision == "ASK":
             report(progress, "understand", "Writing a focused clarification")
             candidate, response = self.refine_clarification(sample["question"], requirement, str(evidence_json.get("clarification_adjudication", {}).get("rationale", "")), timings)

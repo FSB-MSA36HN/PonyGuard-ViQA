@@ -1,0 +1,12 @@
+{"sample_id":"safe_ctrl_founder","question":"Ai đã thành lập phong trào Bauhaus?","gold_answers":["Walter Gropius"],"expected_action":"ANSWER","diagnostic_category":"CONTROL / correct direction, agent asked"}
+{"sample_id":"safe_ctrl_capital","question":"Roma là thủ đô của nước nào?","gold_answers":["Ý"],"expected_action":"ANSWER","diagnostic_category":"CONTROL / correct direction, container asked"}
+{"sample_id":"safe_ctrl_river_mouth","question":"Hoàng Hà đổ vào biển nào?","gold_answers":["Bột Hải"],"expected_action":"ANSWER","diagnostic_category":"CONTROL / correct direction, destination asked"}
+{"sample_id":"safe_rev_founder","question":"Phong trào Bauhaus đã thành lập ai?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / agent and patient swapped"}
+{"sample_id":"safe_rev_capital","question":"Nước Ý là thủ đô của quốc gia nào?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / container and contained swapped"}
+{"sample_id":"safe_rev_river","question":"Bột Hải đổ vào con sông nào?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / source and destination swapped"}
+{"sample_id":"safe_rev_invader","question":"Malaya đã xâm chiếm quốc gia nào?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / invader and invaded swapped"}
+{"sample_id":"safe_rev_builder","question":"Tập đoàn Lend Lease được xây dựng bởi tổ chức nào?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / builder and built swapped"}
+{"sample_id":"safe_rev_influence","question":"Marx và Engels chịu ảnh hưởng của Liên đoàn Cộng sản như thế nào?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / influence direction reversed"}
+{"sample_id":"safe_mismatch_entity_number","question":"Kinh phí xây dựng sân vận động Tổ Chim là bao nhiêu?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / a number is present in context but belongs to another entity"}
+{"sample_id":"safe_mismatch_time","question":"Dân số Hà Nội năm 1990 là bao nhiêu?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / several population figures present, none for the asked year"}
+{"sample_id":"safe_mismatch_attribute","question":"Xưởng phim DEFA được thành lập vào năm nào?","gold_answers":[],"expected_action":"ABSTAIN","diagnostic_category":"ABSTAIN / a founding year is present but belongs to another studio"}

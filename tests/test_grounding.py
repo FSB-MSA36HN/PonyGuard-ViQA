@@ -176,6 +176,7 @@ def test_single_valid_direct_support_is_immutable_without_writer_or_claim_calls(
             {"entity": "Subject", "requested_attribute": "verified value", "question_complete": True, "missing_requirements": []},
             {"support": [{"chunk_id": source.chunk_id, "evidence_quote": source.text, "candidate_answer": "5", "support_type": "DIRECT"}]},
             {"verdicts": [{"chunk_id": source.chunk_id, "verdict": "MATCH"}]},
+            {"question": {"subject": "Subject"}, "source": {"subject": "Subject", "object": "verified value of 5"}},
         ])
         def json(self, *_): return next(self.values), LLMResponse("{}", 1, 1, 1)
     result = PonyGuard(Retriever(), LLM(), intent_first=True).run({"sample_id": "canonical", "question": "What is Subject's verified value?", "gold_answers": ["5"], "expected_action": "ANSWER"})

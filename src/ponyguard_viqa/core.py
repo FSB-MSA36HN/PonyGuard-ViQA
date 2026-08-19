@@ -15,7 +15,10 @@ REQUIRED_REQUIREMENT_SLOTS = frozenset({"entity", "requested_attribute"})
 SLOT_RESOLUTIONS = frozenset({"RESOLVED", "REFERENTIAL", "ABSENT"})
 # The dimension an interrogative asks for is the requested value, never a missing
 # input. Derived from the answer-type enum, so it holds for any question wording.
-ANSWER_TYPE_SATISFIES = {"TIME": frozenset({"time"}), "DATE": frozenset({"time"}), "LOCATION": frozenset({"location", "country"})}
+# Strictly the dimension the answer type *is*: a sibling dimension can still be a
+# genuine missing input, as in a location question whose jurisdiction is a
+# referential span ("the capital of that country is where?").
+ANSWER_TYPE_SATISFIES = {"TIME": frozenset({"time"}), "DATE": frozenset({"time"}), "LOCATION": frozenset({"location"})}
 
 
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
