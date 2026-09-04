@@ -214,57 +214,40 @@ thiết kế dựa theo, và **bằng không** trên dữ liệu mới.
 ## PHẦN 5 — Kết quả, hạn chế và hướng phát triển
 ### Hải · 2 phút 15
 
-*Slide: bảng metric 3 hệ; dưới cùng dòng đỏ "vẫn còn 2 câu trả lời sai".*
+*Slide: biểu đồ so sánh Basic RAG, Prompt-Safe và PonyGuard.*
 
-Cảm ơn Hiệp. Em là Hải.
+Cảm ơn Hiệp. Em là Hải. Phần này trả lời ba câu đơn giản: PonyGuard có chặn
+được câu trả lời sai hơn Basic RAG không, câu trả lời nó giữ lại đáng tin đến
+đâu, và phải đánh đổi điều gì.
 
-Trên test set đóng băng UIT-ViQuAD 2.0, mẫu 200 câu cân bằng:
+Nhóm đánh giá ba hệ trên cùng 200 câu test đóng băng, cùng corpus, retriever và
+model local. Trong đó có 103 câu có đáp án và 97 câu không nên trả lời.
 
-| Metric | Basic | Prompt-Safe | **PonyGuard** |
-| --- | ---: | ---: | ---: |
-| Trả lời câu không nên trả lời ↓ | 0.402 | 0.320 | **0.134** |
-| Từ chối đúng ↑ | 0.598 | 0.680 | **0.866** |
-| **Precision — trả lời có đúng chỗ không ↑** | 0.530 | 0.569 | **0.705** |
-| Recall ↑ | 0.427 | 0.398 | 0.301 |
-| **Balanced accuracy ↑** | 0.513 | 0.539 | **0.583** |
-| Số lần gọi LLM | 2.17 | 2.27 | 4.03 |
+**Kết quả quan trọng nhất là độ an toàn.** Với 97 câu không có đáp án, Basic RAG
+vẫn trả lời sai 39 câu. PonyGuard còn 13 câu. Nghĩa là các bước kiểm tra đã chặn
+được thêm 26 câu trả lời sai trong cùng điều kiện thử.
 
-**Thứ nhất — dặn dò bằng prompt gần như không ăn thua.** Prompt-Safe giảm tỷ lệ
-trả lời sai từ 0.402 xuống 0.320, nhưng **bỏ sót nhiều hơn**. Nó nhát hơn chứ
-không tinh hơn.
+**Chất lượng của những câu được trả lời cũng tốt hơn.** Ở Basic RAG, khoảng 53%
+câu trả lời được chấp nhận là đúng; với PonyGuard là 70,5%. Vì vậy kết quả không
+chỉ đến từ việc hệ thống từ chối nhiều hơn: các câu trả lời còn lại đáng tin hơn.
+Điểm chất lượng quyết định tổng thể cũng tăng từ 0,513 lên 0,583.
 
-**Thứ hai — PonyGuard giảm xuống 0.134, tức giảm hai phần ba** so với baseline.
+`[Chuyển sang slide chất lượng hiện tại]`
 
-Nhưng có một câu phản biện quan trọng: **liệu nó chỉ đang siết ngưỡng cho an
-toàn thôi?** Câu trả lời nằm ở dòng in đậm giữa bảng. Nếu chỉ nhát hơn một cách
-mù quáng thì **precision sẽ gần như không đổi**. Thực tế nó tăng từ **0.530 lên
-0.705**, và balanced accuracy tăng **0.513 lên 0.583**. Nghĩa là hệ thống đã đi
-**ra khỏi** đường trade-off cũ chứ không trượt dọc theo nó.
+Tuy nhiên đây chưa phải một hệ có thể dùng cho mọi tình huống. Nó vẫn trả lời 13
+trong 97 câu lẽ ra phải từ chối. Và trong 103 câu có đáp án, PonyGuard mới trả
+lời đúng 31 câu; Basic RAG trả lời đúng 44 câu.
 
-`[Chỗ mất recall]`
+Nhóm đã tách nguyên nhân để biết cần cải thiện ở đâu. Trong 72 câu PonyGuard bỏ
+sót, 34 câu không có đáp án trong các chunk đã truy hồi—đây là giới hạn retrieval.
+38 câu còn lại là phần chi phí của các guard hiện tại đang quá chặt.
 
-**Cái giá là có thật, và nhóm em tách được nó ra.** PonyGuard bỏ sót 72 câu, nhưng
-**34 câu là do đáp án không hề có trong chunk nào retrieve được** — giới hạn của
-retriever, chung cho cả ba hệ. Chỉ **38 câu còn lại** mới do tầng kiểm tra quá
-chặt.
+Đánh đổi thứ hai là tốc độ: thời gian phản hồi trung vị của PonyGuard là 24,8
+giây, so với 11,7 giây ở Basic RAG.
 
-Tính theo phần retrieve được: Basic bắt được **81%**, PonyGuard **58%**. Khoảng
-cách đó là mục tiêu cải thiện tiếp theo, rất rõ ràng.
-
-`[Hạn chế]`
-
-**Và đây là phần nhóm em chưa làm được.** Hệ thống **vẫn để lọt hai câu trả lời
-sai** — trong đó có **đúng câu đảo vai mà bạn Đức mở đầu bài này**. Cả hai đều có
-citation hợp lệ, tức là qua được toàn bộ các bước kiểm tra hiện có. Nên nhóm em
-**không coi đề tài là đã đạt mục tiêu**.
-
-Nguyên nhân đã khoanh vùng: hai **tầng phán đoán** chưa đủ tin cậy trên model
-đang dùng. Và **tăng size model không giải quyết được** — cùng năm câu sai trên
-cả ba model 3B, 7B, 8B. Tỷ lệ lọt khoảng 30% và **lúc được lúc không**, nên
-hướng tiếp theo là **hỏi model nhiều lần, chỉ chấp nhận khi tất cả đồng ý**.
-
-> Kết quả đáng giá nhất của đề tài không phải con số, mà là nhóm em biết **chính
-> xác** cái gì đang chặn mình, và chứng minh được bằng **số đo** chứ không phải
-> phỏng đoán.
+Vì vậy, kết luận hiện tại là PonyGuard phù hợp khi ưu tiên giảm câu trả lời sai
+một cách tự tin, nhưng chưa phù hợp cho tình huống rủi ro cao. Bước tiếp theo là
+cải thiện retrieval, hiệu chỉnh guard để nhận thêm bằng chứng trực tiếp, rồi
+đánh giá trên toàn bộ test set và các lĩnh vực khác.
 
 Nhóm em xin hết. Rất mong nhận được câu hỏi từ thầy cô và các bạn.
