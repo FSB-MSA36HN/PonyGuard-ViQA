@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from time import perf_counter
 from pathlib import Path
 from typing import Any, Callable
 
-from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, SLOT_LABELS, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
+from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, SLOT_LABELS, undiacritic, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
 from .llm import LocalLLM
 from .retrieval import Retriever
 
@@ -20,6 +21,12 @@ def prompt(name: str) -> str:
 
 def context(chunks: list[Chunk]) -> str:
     return "\n\n".join(f"[{item.chunk_id}] {item.text}" for item in chunks)
+
+
+def bigrams(value: str, minimum: int = 6) -> set[str]:
+    """Two-word spans long enough to identify something."""
+    terms = tokenise(value)
+    return {gram for gram in (" ".join(terms[index:index + 2]) for index in range(len(terms) - 1)) if len(gram) >= minimum}
 
 
 def report(progress: Progress | None, stage: str, message: str) -> None:
@@ -351,6 +358,8 @@ class PonyGuard:
     @staticmethod
     def decision_rationale(requirement: Requirement, evidence: dict[str, Any], decision: Action) -> str:
         target = PonyGuard.requested_target(requirement)
+        if decision == "ASK" and requirement.spelling_alternatives:
+            return f"Cách viết trong câu hỏi không có trong nguồn; nguồn dùng “{requirement.spelling_alternatives[0]}”."
         if decision == "ASK":
             slots = ", ".join(SLOT_LABELS.get(slot, slot) for slot in requirement.missing_requirements)
             asked = f" khi hỏi về {requirement.requested_attribute}" if requirement.requested_attribute else ""
@@ -397,6 +406,75 @@ class PonyGuard:
         if "reference" in requirement.missing_requirements or "target" in requirement.missing_requirements:
             return f"Bạn đang nói tới người, vật hoặc đối tượng nào khi hỏi về {requirement.requested_attribute or 'thông tin này'}?"
         return "Bạn có thể làm rõ chính xác thông tin cần hỏi không?"
+
+    @staticmethod
+    def missing_bare_grams(question: str, chunks: list[Chunk], focus: str = "") -> set[str]:
+        """Question spans, stripped of marks, that no source spells that way."""
+        asked = bigrams(question)
+        if normalize_text(focus):
+            asked = {gram for gram in asked if normalized_contains(focus, gram)}
+        source = {gram for chunk in chunks for gram in bigrams(chunk.text)}
+        return {undiacritic(gram) for gram in asked - source}
+
+    @staticmethod
+    def spelling_alternatives(question: str, chunks: list[Chunk], focus: str = "", limit: int = 2) -> list[str]:
+        """Source spans written with the same letters but different marks.
+
+        A mistyped span names nothing the sources contain, so the clarification
+        worth asking is the wording the sources actually use. A candidate must
+        be letter-for-letter the question's own span, differing only in its
+        diacritics — never a merely similar word, and never a fixed vocabulary.
+        Single words are excluded: in a language with tone marks almost every
+        word has a legitimate sibling, so only a multi-word span carries signal,
+        and only where the question's own slots point.
+
+        A span is a misspelling only when the sources agree on one reading of it:
+        the corrections of a mistyped span concentrate on a single spelling,
+        while a span that merely reads as a question ("bao nhiêu tỉnh") matches
+        several unrelated spellings about equally and is left alone.
+        """
+        asked = bigrams(question)
+        bare = PonyGuard.missing_bare_grams(question, chunks, focus)
+        counts: Counter[str] = Counter()
+        for chunk in chunks:
+            counts.update(gram for gram in bigrams(chunk.text) if undiacritic(gram) in bare and gram not in asked)
+        offered: list[tuple[int, str]] = []
+        for key in bare:
+            group = sorted(((count, gram) for gram, count in counts.items() if undiacritic(gram) == key), reverse=True)
+            runner_up = group[1][0] if len(group) > 1 else 0
+            if group and group[0][0] > 1 and group[0][0] >= 2 * runner_up:
+                offered.append(group[0])
+        # Two corrections of the same typo overlap in a word; keep the strongest.
+        chosen: list[str] = []
+        for _, gram in sorted(offered, reverse=True):
+            words = set(gram.split())
+            if not any(words & set(kept.split()) for kept in chosen):
+                chosen.append(gram)
+            if len(chosen) == limit:
+                break
+        return chosen
+
+    @staticmethod
+    def offer_spelling_alternatives(requirement: Requirement, question: str, chunks: list[Chunk], retriever: Any = None, evidence: dict[str, Any] | None = None) -> list[str]:
+        """Replace invented options with the source wording when one is close.
+
+        A named subject bounds the search to the spans the question is about; an
+        unnamed one is itself the candidate misspelling, so every span is open.
+        """
+        entity = normalize_text(str(requirement.entity or (evidence or {}).get("entity") or ""))
+        attribute = normalize_text(str(requirement.requested_attribute or (evidence or {}).get("requested_attribute") or ""))
+        focus = f"{entity} {attribute}".strip() if entity else ""
+        alternatives = PonyGuard.spelling_alternatives(question, chunks, focus)
+        if not alternatives and hasattr(retriever, "documents_matching"):
+            # A misspelled query retrieves unrelated chunks, so look the span up
+            # in the corpus itself before deciding the wording is unknown.
+            found = retriever.documents_matching(PonyGuard.missing_bare_grams(question, chunks, focus), limit=60)
+            alternatives = PonyGuard.spelling_alternatives(question, found, focus)
+        if alternatives:
+            requirement.spelling_alternatives = alternatives
+            requirement.clarification_options = alternatives
+            requirement.clarification_question = f"Ý bạn là {' hay '.join(alternatives)}?"
+        return alternatives
 
     @staticmethod
     def requested_target(requirement: Requirement) -> str:
@@ -483,23 +561,31 @@ class PonyGuard:
         return {"draft": value, "grounding": grounding, "support": support}, stats, errors
 
     def run(self, sample: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
-        question = resolved_question(sample["question"])
-        resolved_follow_up = question != sample["question"]
+        original_question = sample["question"]
+        question = resolved_question(original_question)
+        resolved_follow_up = question != original_question
         sample = {**sample, "question": question}
         state = PonyGuardState(sample.get("sample_id"), question); stats = []; timings: dict[str, Any] = {}
         intent_requirement = None
         if self.intent_first:
             report(progress, "understand", "Understanding the question")
             intent_requirement, response = self.analyze_intent(question, timings); stats.append(response)
+            if intent_requirement:
+                intent_requirement = self.apply_user_clarification(original_question, intent_requirement, sample.get("clarification_for", []))
             if intent_requirement and intent_requirement.missing_requirements:
                 state.requirements = intent_requirement.__dict__
                 state.decision = "ASK"; state.decision_reason = self.decision_rationale(intent_requirement, {}, "ASK")
-                candidate, writer = self.refine_clarification(question, intent_requirement, "", timings)
-                if writer is not None: stats.append(writer)
-                if candidate: intent_requirement.clarification_question = candidate
+                report(progress, "search", "Searching sources")
+                ask_chunks = self.retriever.retrieve(question, self.top_k)
+                timings["retrieval"] = getattr(self.retriever, "last_timing", {})
+                state.retrieval = {"chunks": [chunk.to_dict() for chunk in ask_chunks]}
+                if not self.offer_spelling_alternatives(intent_requirement, question, ask_chunks, self.retriever):
+                    candidate, writer = self.refine_clarification(question, intent_requirement, "", timings)
+                    if writer is not None: stats.append(writer)
+                    if candidate: intent_requirement.clarification_question = candidate
                 answer = self.clarification_question(intent_requirement, question)
                 state.requirements, state.final_answer, state.metrics = intent_requirement.__dict__, answer, {"llm_calls": sum(item.calls for item in stats)}
-                return _prediction(sample, "ponyguard", "ASK", answer, [], stats, state.to_dict(), state.decision_reason, timings=timings)
+                return _prediction(sample, "ponyguard", "ASK", answer, ask_chunks, stats, state.to_dict(), state.decision_reason, timings=timings)
         report(progress, "search", "Searching sources")
         chunks = self.retriever.retrieve(sample["question"], self.top_k); timings["retrieval"] = getattr(self.retriever, "last_timing", {}); state.retrieval = {"chunks": [c.to_dict() for c in chunks]}
         report(progress, "understand", "Understanding the question and evidence")
@@ -615,7 +701,15 @@ class PonyGuard:
             else:
                 supports = kept
                 evidence_json["valid_supports"] = kept
-        if decision == "ASK":
+        # A refusal on a span the sources spell almost identically is a wording
+        # mismatch, not an evidence gap: ask with the source wording instead.
+        if decision in ("ASK", "ABSTAIN") and not supports and self.offer_spelling_alternatives(requirement, sample["question"], chunks, self.retriever, evidence_json):
+            if decision == "ABSTAIN":
+                requirement.missing_requirements = ["reference"]
+                requirement.question_clear, requirement.ambiguity_type = False, "MISSING_REQUIREMENT"
+                decision = "ASK"
+            state.requirements = requirement.__dict__
+        elif decision == "ASK":
             report(progress, "understand", "Writing a focused clarification")
             candidate, response = self.refine_clarification(sample["question"], requirement, str(evidence_json.get("clarification_adjudication", {}).get("rationale", "")), timings)
             if response is not None:

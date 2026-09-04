@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PonyGuard-ViQA - Bài Thuyết Trình</title>
+    
+    <!-- Google Fonts for Vietnamese Support -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Reveal.js core CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.css">
+    
+    <!-- Reveal.js Theme (Light Mode) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/theme/simple.min.css" id="theme">
+    
+    <!-- Highlight.js Theme -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/plugin/highlight/monokai.min.css">
+    
+    <!-- Custom CSS for 16:9 layout (1920x1080 base) & UI/UX Specs -->
+    <style>
+        .reveal {
+            font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #333;
+            font-size: 36px;
+        }
+        .reveal h1, .reveal h2, .reveal h3 {
+            color: #2c3e50;
+            text-transform: none;
+            font-weight: 700;
+            font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        .reveal h2 {
+            font-size: 2.2em;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+        .reveal h3 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #2980b9;
+        }
+        .highlight-blue { color: #2980b9; font-weight: bold; }
+        .highlight-red { color: #e74c3c; font-weight: bold; }
+        .highlight-green { color: #2ecc71; font-weight: bold; }
+        
+        .reveal .slides { text-align: left; }
+        .reveal p, .reveal li {
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        .reveal ul { margin-left: 50px; }
+        
+        /* Flexbox Layouts */
+        .flex-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 40px;
+            margin-top: 30px;
+        }
+        .col { flex: 1; }
+        
+        /* Card UI */
+        .box {
+            border: none;
+            padding: 30px;
+            border-radius: 12px;
+            background-color: #f8f9fa;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.06);
+            text-align: center;
+        }
+        .box-title {
+            font-size: 1.4em;
+            margin-bottom: 20px;
+            display: block;
+        }
+        .icon-large {
+            font-size: 2em;
+            margin-bottom: 10px;
+            display: block;
+        }
+        
+        /* Flowchart elements */
+        .flow-box {
+            background: #ffffff;
+            border: 2px solid #bdc3c7;
+            border-radius: 8px;
+            padding: 15px 30px;
+            display: inline-block;
+            font-weight: 600;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .flow-arrow {
+            font-size: 2em;
+            color: #7f8c8d;
+            vertical-align: middle;
+            margin: 0 15px;
+        }
+        .flow-error {
+            border-color: #e74c3c;
+            color: #e74c3c;
+            background: #fadbd8;
+        }
+        
+        /* Specific elements */
+        .chart-container {
+            width: 100%;
+            height: 600px;
+            position: relative;
+        }
+        .stamp-wrong {
+            color: white;
+            background-color: #e74c3c;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            display: inline-block;
+            transform: rotate(-5deg);
+            margin-left: 15px;
+        }
+        .text-center { text-align: center; }
+        
+        /* Table UI */
+        .styled-table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 30px;
+            font-size: 0.9em;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .styled-table thead tr {
+            background-color: #2c3e50;
+            color: #ffffff;
+            text-align: center;
+        }
+        .styled-table th, .styled-table td {
+            padding: 20px 25px;
+            text-align: center;
+        }
+        .styled-table tbody tr {
+            border-bottom: 1px solid #dddddd;
+            background: #fff;
+        }
+        .styled-table tbody tr:nth-of-type(even) { background-color: #f8f9fa; }
+        .styled-table tbody tr:last-of-type { border-bottom: 2px solid #2980b9; }
+
+        /* Timeline */
+        .timeline {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 60px;
+        }
+        .tl-step {
+            text-align: center;
+            position: relative;
+            flex: 1;
+        }
+        .tl-circle {
+            width: 40px; height: 40px;
+            background: #2980b9;
+            color: white;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            z-index: 2;
+            position: relative;
+        }
+        .tl-line {
+            position: absolute;
+            top: 20px; left: 50%; width: 100%; height: 4px;
+            background: #bdc3c7;
+            z-index: 1;
+        }
+        .tl-text {
+            margin-top: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        /* Pipeline rows */
+        .pipe {
+            display: flex;
+            align-items: flex-start;
+            gap: 18px;
+            background: #fff;
+            border-left: 5px solid #2980b9;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 12px;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.06);
+            position: relative;
+        }
+        .pipe > div { flex: 1; font-size: 0.72em; line-height: 1.45; }
+        .pipe strong { color: #2c3e50; }
+        .pipe-n {
+            flex: 0 0 34px;
+            width: 34px; height: 34px;
+            background: #2980b9; color: #fff;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.75em;
+        }
+        .pipe-sub { color: #5d6d7e; font-weight: 400; }
+        .pipe-fn {
+            display: inline-block;
+            margin-top: 4px;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            font-size: 0.85em;
+            color: #8e44ad;
+        }
+        .pipe-exit {
+            flex: 0 0 auto;
+            align-self: center;
+            font-size: 0.62em;
+            font-weight: 700;
+            color: #2980b9;
+            background: #eaf2f8;
+            border-radius: 6px;
+            padding: 6px 12px;
+            white-space: nowrap;
+        }
+        .pipe-exit.err { color: #c0392b; background: #fadbd8; }
+    </style>
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            
+            <!-- Slide 0: Mở đầu -->
+            <section class="text-center">
+                <h1 style="font-size: 4.5em; font-weight: 700; color: #2c3e50; margin-bottom: 40px;">PonyGuard-ViQA</h1>
+                <h2 style="font-size: 1.8em; color: #7f8c8d; font-weight: 400; border: none;">Hệ hỏi đáp tiếng Việt biết từ chối trả lời<br>để chống Hallucination</h2>
+            </section>
+            
+            <!-- ================= BÀI TOÁN & ĐỘNG LỰC ================= -->
+            
+            <!-- Slide 1.1: Bài toán -->
+            <section>
+                <h2>1. Vấn đề của hệ thống RAG hiện tại</h2>
+                <div class="flex-container">
+                    <div class="col" style="flex: 1;">
+                        <ul>
+                            <li class="fragment">Các hệ thống RAG (Retrieval-Augmented Generation) thông thường luôn cố gắng trả lời mọi câu hỏi.</li>
+                            <li class="fragment">LLM dễ bị "thuyết phục" bởi ngữ cảnh và sẵn sàng <span class="highlight-red">tự suy diễn (Hallucination)</span>.</li>
+                            <li class="fragment">Điều này cực kỳ nguy hiểm trong các lĩnh vực cần tính chính xác cao (y tế, luật, tài chính).</li>
+                        </ul>
+                    </div>
+                    <div class="col fragment text-center" style="flex: 1; background: #f8f9fa; padding: 40px; border-radius: 12px;">
+                        <h3 style="margin-bottom: 40px; color: #2c3e50;">Luồng gây lỗi (Hallucination Loop)</h3>
+                        <div class="flow-box">User Query</div>
+                        <br><span class="flow-arrow">↓</span><br>
+                        <div class="flow-box">Retriever (Tài liệu không liên quan)</div>
+                        <br><span class="flow-arrow">↓</span><br>
+                        <div class="flow-box" style="background:#e8f4f8;">LLM Cố gắng Khớp nối</div>
+                        <br><span class="flow-arrow">↓</span><br>
+                        <div class="flow-box flow-error">Câu trả lời Sai sự thật!</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 1.2: Động lực & Triết lý -->
+            <section>
+                <h2>Động lực nghiên cứu & Triết lý</h2>
+                
+                <div class="box fragment" style="text-align: left; margin: 40px 0;">
+                    <p style="font-size: 1.2em; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px;"><strong>Trường hợp thực tế (Ví dụ):</strong></p>
+                    <p><strong>Nguồn văn bản:</strong> "Làng Olympic <strong class="highlight-blue">do tập đoàn Lend Lease xây dựng</strong>".</p>
+                    <p><strong>Câu hỏi:</strong> "Tập đoàn Lend Lease được Làng Olympic xây dựng ở đâu?"</p>
+                    <p class="fragment"><strong>Hệ thống trả lời:</strong> "Thung lũng Lower Lea" — kèm citation đúng chunk, quote nguyên văn <span class="stamp-wrong">SAI</span></p>
+                    <p class="fragment" style="font-size:0.8em; color:#7f8c8d; margin-bottom:0;">Đây là <strong>chính PonyGuard ở một phiên bản đang phát triển</strong>, không phải baseline — một hệ đã có nhiều tầng kiểm tra vẫn để lọt.</p>
+                </div>
+                
+                <ul>
+                    <li class="fragment">Hệ thống trích xuất đúng nguyên văn, nhưng LLM hoàn toàn không nhận ra lỗi <strong>đảo chủ ngữ - tân ngữ</strong> trong câu hỏi cạm bẫy.</li>
+                    <li class="fragment"><strong class="highlight-blue">Triết lý dự án:</strong> Thà bỏ sót (từ chối trả lời) còn hơn nói sai sự thật. Phải có một hệ thống chặn (Guard) độc lập.</li>
+                </ul>
+            </section>
+            
+            <!-- ================= MỤC TIÊU & THIẾT KẾ ================= -->
+
+            <!-- Slide 2.1: Định nghĩa lại Output -->
+            <section>
+                <h2>2. Mục tiêu: Định nghĩa lại đầu ra (Output)</h2>
+                <p class="text-center" style="font-size: 1.3em; margin-bottom: 50px;">Hệ thống chọn 1 trong 3 hành động thay vì sinh chữ tự do:</p>
+                
+                <div class="flex-container">
+                    <div class="col box fragment">
+                        <span class="icon-large">✅</span>
+                        <strong class="box-title highlight-green" style="font-size: 1.6em;">ANSWER</strong>
+                        <p style="font-size: 0.9em; text-align: left;">Tài liệu xác lập được quan hệ được hỏi, có citation và quote nguyên văn.</p>
+                    </div>
+                    <div class="col box fragment">
+                        <span class="icon-large">❓</span>
+                        <strong class="box-title highlight-blue" style="font-size: 1.6em;">ASK</strong>
+                        <p style="font-size: 0.9em; text-align: left;">Bản thân câu hỏi thiếu thông tin, bị mơ hồ. Hệ thống yêu cầu người dùng làm rõ.</p>
+                    </div>
+                    <div class="col box fragment">
+                        <span class="icon-large">❌</span>
+                        <strong class="box-title highlight-red" style="font-size: 1.6em;">ABSTAIN</strong>
+                        <p style="font-size: 0.9em; text-align: left;">Tài liệu không có đáp án, hoặc câu hỏi có tiền đề sai sự thật (cạm bẫy).</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 2.2: Thiết kế so sánh -->
+            <section>
+                <h2>Thiết kế Thực nghiệm So sánh</h2>
+                <p>Cùng chung Corpus (5.442 chunk), cùng Retriever (FAISS + <code>multilingual-e5-small</code>, top-k=5), cùng Model nền (Qwen3-8B) và cùng schema đầu ra.</p>
+                
+                <table class="styled-table fragment">
+                    <thead>
+                        <tr>
+                            <th>Hệ thống</th>
+                            <th>Chiến lược</th>
+                            <th>Mức độ kiểm soát an toàn</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Basic RAG</strong> <em>(Baseline)</em></td>
+                            <td>Retrieve văn bản &rarr; Đưa thẳng cho LLM sinh tự do.</td>
+                            <td><span style="color:#e74c3c;">Thấp (Hoàn toàn phụ thuộc LLM)</span></td>
+                        </tr>
+                        <tr class="fragment">
+                            <td><strong>Prompt-Safe RAG</strong></td>
+                            <td>Thêm Prompt dặn dò: <em>"Nếu không biết, hãy nói không biết."</em></td>
+                            <td><span style="color:#f39c12;">Trung bình (nhát hơn, không tinh hơn)</span></td>
+                        </tr>
+                        <tr class="fragment">
+                            <td style="background-color: #eaf2f8;"><strong>PonyGuard RAG</strong></td>
+                            <td style="background-color: #eaf2f8;">LLM đề xuất bằng chứng có cấu trúc; code xác minh từng bước rồi mới cho trả lời.</td>
+                            <td style="background-color: #eaf2f8;"><span style="color:#2ecc71; font-weight: bold;">Cao (Deterministic validation)</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- ================= KIẾN TRÚC PONYGUARD ================= -->
+            
+            <!-- Slide 3.1: Kiến trúc (Nguyên tắc) -->
+            <section>
+                <h2>3. Kiến trúc PonyGuard: Nguyên tắc Cốt lõi</h2>
+                <p class="text-center" style="font-size: 1.6em; margin-bottom: 40px;">
+                    <strong class="highlight-blue">LLM đề xuất thông tin — Code Python quyết định</strong>
+                </p>
+                
+                <div class="flex-container">
+                    <div class="col fragment" style="flex: 0.85;">
+                        <ul style="margin-left: 20px;">
+                            <li>LLM không trả lời trực tiếp. Nó trả về <strong>JSON có cấu trúc</strong>: chunk_id, quote nguyên văn, đáp án ứng viên, cặp span thực thể.</li>
+                            <li>Code duyệt một <strong>chuỗi 7 điều kiện</strong>; chỉ khi qua hết mới đưa bằng chứng vào <code>valid</code>.</li>
+                            <li>Vi phạm bất kỳ bước nào &rarr; ghi lý do vào <code>rejected</code> &rarr; <strong class="highlight-red">ABSTAIN</strong>.</li>
+                        </ul>
+                        <p style="font-size: 0.8em; color:#7f8c8d; margin-left: 20px;">Mọi lý do loại đều được ghi lại, nên mọi lần từ chối đều truy được nguyên nhân.</p>
+                    </div>
+                    <div class="col fragment" style="flex: 1.15;">
+                        <pre style="width: 100%; box-shadow: 0 10px 20px rgba(0,0,0,0.15); border-radius: 8px;"><code class="language-python" data-trim data-noescape style="padding: 18px; font-size: 0.72em; line-height: 1.45;">
+# pipelines.py — PonyGuard.validated_supports()
+if not chunk:
+    rejected.append("Support tham chiếu chunk không tồn tại.")
+elif not normalized_contains(chunk.text, quote):
+    rejected.append(f"Quote không nằm trong {chunk.chunk_id}.")
+elif not inference and status != "SUPPORTED":
+    rejected.append(f"Premise của câu hỏi {status.lower()} ...")
+elif not inference and relation_match is not True:
+    rejected.append(f"Quan hệ trong {chunk.chunk_id} không khớp ...")
+elif inference and not PonyGuard.inference_proof_is_valid(
+        support, chunks, question):
+    rejected.append(f"Inference proof không hợp lệ ...")
+elif not inference and not answer_matches_quote(candidate, quote):
+    rejected.append(f"Candidate answer không khớp quote ...")
+elif question and not PonyGuard.entity_binding_is_literal(...):
+    rejected.append(f"Entity trong {chunk.chunk_id} không khớp ...")
+else:
+    valid.append({**support, ...})   # chỉ đây mới được ANSWER
+                        </code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 3.2: Chi tiết Pipeline -->
+            <section>
+                <h2>Pipeline Xác minh — 5 Tầng</h2>
+
+                <div class="flex-container" style="margin-top: 20px; gap: 30px;">
+                    <div class="col" style="flex: 1.25;">
+                        <div class="pipe fragment">
+                            <span class="pipe-n">1</span>
+                            <div><strong>Phân tích Intent</strong> — <em>chạy TRƯỚC khi retrieve</em>
+                            <br><span class="pipe-sub">Model khai từng slot + span copy nguyên văn từ câu hỏi + nhãn RESOLVED / REFERENTIAL / ABSENT. Code kiểm tra span có thật trong câu hỏi và <strong>tự tính</strong> kết luận.</span>
+                            <br><span class="pipe-fn">analyze_intent() · core.intent_slot_bindings()</span></div>
+                            <span class="pipe-exit">thiếu slot → ASK</span>
+                        </div>
+
+                        <div class="pipe fragment">
+                            <span class="pipe-n">2</span>
+                            <div><strong>Retrieve + Trích xuất bằng chứng</strong>
+                            <br><span class="pipe-sub">FAISS top-k=5. Mỗi bằng chứng bắt buộc kèm quote <strong>nguyên văn</strong>, đáp án ứng viên, loại DIRECT / SIMPLE_INFERENCE.</span>
+                            <br><span class="pipe-fn">extract_facts() · prompts/fact_extractor_v1.txt</span></div>
+                        </div>
+
+                        <div class="pipe fragment">
+                            <span class="pipe-n">3</span>
+                            <div><strong>Verify quan hệ</strong>
+                            <br><span class="pipe-sub">Ba nhãn: <code>MATCH</code> / <code>CONTRADICTED</code> / <code>UNSTATED</code>. Chỉ MATCH mới cho qua bằng chứng DIRECT.</span>
+                            <br><span class="pipe-fn">verify_relations() · prompts/relation_verifier_v1.txt</span></div>
+                        </div>
+
+                        <div class="pipe fragment" style="border-left-color:#27ae60;">
+                            <span class="pipe-n" style="background:#27ae60;">4</span>
+                            <div><strong>Kiểm tra bằng code — 7 bước tuần tự</strong>
+                            <br><span class="pipe-sub">Chunk tồn tại → quote nguyên văn → tiền đề đúng → quan hệ/thuộc tính khớp → đáp án nằm trong quote → entity khớp cả hai phía → không lặp lại câu hỏi.</span>
+                            <br><span class="pipe-fn">validated_supports()</span></div>
+                            <span class="pipe-exit err">fail bất kỳ bước → ABSTAIN</span>
+                        </div>
+
+                        <div class="pipe fragment" style="border-left-color:#8e44ad;">
+                            <span class="pipe-n" style="background:#8e44ad;">5</span>
+                            <div><strong>Hai nhánh chuyên biệt</strong>
+                            <br><span class="pipe-sub"><strong>5b</strong> — câu suy luận: bắt buộc 2 toán hạng có quote riêng, Python <strong>tính lại phép toán</strong>.
+                            <br><strong>5c</strong> — kiểm tra <strong>chiều quan hệ</strong>: chủ ngữ câu hỏi khớp tân ngữ nguồn hơn chủ ngữ nguồn ⇒ đảo vai ⇒ loại.</span>
+                            <br><span class="pipe-fn">inference_proof_is_valid() · direction_matches()</span></div>
+                        </div>
+
+                        <div class="fragment text-center" style="margin-top: 15px;">
+                            <span class="flow-arrow">↓</span>
+                            <div class="flow-box" style="border-color:#27ae60; background:#eafaf1; color:#1e8449;">Answer plan bị <strong>KHÓA</strong> → ANSWER</div>
+                        </div>
+                    </div>
+
+                    <div class="col fragment" style="flex: 0.75;">
+                        <div class="box" style="text-align: left; background:#eaf2f8;">
+                            <h3 style="margin-bottom: 15px;">Hai điểm thiết kế</h3>
+                            <p style="font-size: 0.85em;"><strong>Vì sao Intent chạy trước retrieve?</strong><br>
+                            Nếu để sau, hệ thống sẽ hỏi lại chỉ vì không tìm thấy bằng chứng — mà đó là lý do để <strong>từ chối</strong>, không phải để hỏi.</p>
+                            <p style="font-size: 0.85em;"><strong>Vì sao khóa answer plan?</strong><br>
+                            Qua đủ 7 bước thì bộ ba đáp án – quote – citation <strong>bất biến</strong>. Tầng viết câu chữ chỉ được diễn đạt lại, không được thay.</p>
+                        </div>
+                        <div class="box" style="text-align: left; margin-top: 25px;">
+                            <p style="font-size: 0.85em; margin: 0;"><strong>LLM</strong> chỉ xuất hiện ở tầng 1, 2, 3 và 5c — luôn ở vai <em>đề xuất</em>.<br>
+                            <strong>Quyết định chấp nhận</strong> nằm trọn ở tầng 4 và 5b, hoàn toàn bằng code.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= ĐÁNH GIÁ & PHÁT HIỆN ================= -->
+            
+            <!-- Slide 4.1: Cấu trúc bộ Test -->
+            <section>
+                <h2>4. Bộ dữ liệu chẩn đoán hành vi</h2>
+
+                <div class="flex-container align-items-center">
+                    <div class="col fragment">
+                        <p>48 câu hỏi chẩn đoán chia thành ba nhóm:</p>
+                        <ul>
+                            <li style="margin-bottom: 15px;"><strong class="highlight-blue">Tuned — 26 câu:</strong> Quan sát để tìm lỗi, chỉnh prompt/luật rồi tạo regression test.</li>
+                            <li style="margin-bottom: 15px;"><strong class="highlight-blue">Held-out — 10 câu:</strong> Không dùng để chỉnh hệ thống; kiểm tra cấu trúc câu hỏi chưa thấy.</li>
+                            <li style="margin-bottom: 15px;"><strong class="highlight-red">Safety — 12 câu:</strong> 9 câu bẫy cần ABSTAIN và 3 câu đúng cần ANSWER, tránh chiến lược luôn từ chối.</li>
+                        </ul>
+                        <p>Đây là bộ câu hỏi chẩn đoán có chủ đích, không phải frozen benchmark chính thức.</p>
+                    </div>
+                    <div class="col fragment" style="flex: 0.8;">
+                        <canvas id="pieChart" style="max-height: 400px;"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 4.2: Phát hiện Kỹ thuật -->
+            <section>
+                <h2>Các Phát hiện Kỹ thuật Quan trọng</h2>
+
+                <div class="flex-container">
+                    <div class="col box fragment" style="border-left: 5px solid #e74c3c; text-align: left;">
+                        <h3 class="highlight-red" style="margin-bottom: 10px;">1. Suy luận số học: phải kiểm tra đúng cách</h3>
+                        <p style="font-size: 0.95em;"><strong>Ví dụ thật:</strong> Nguồn ghi 97,3% biết tiếng Pháp và 1,1% không biết, nhưng <em>không</em> ghi sẵn chênh lệch 96,2%.</p>
+                        <p style="font-size: 0.95em;"><strong>Vấn đề:</strong> Ta hỏi tầng verify <em>"nguồn có nói về quan hệ chênh lệch không?"</em> — nó luôn trả lời <strong>không</strong>, và trả lời vậy là <strong>đúng</strong>. Bộ kiểm tra số học viết đúng nhưng <strong>không bao giờ chạy tới</strong>.</p>
+                        <p style="font-size: 0.95em;"><strong>Cách xử lý:</strong> Bỏ verify quan hệ tổng hợp; verify <strong>từng toán hạng</strong> kèm quote riêng, rồi Python <strong>tính lại</strong> phép toán. Chặt hơn chứ không lỏng hơn: 4 bước kiểm tra thay 1 phán đoán.</p>
+                    </div>
+
+                    <div class="col box fragment" style="border-left: 5px solid #f39c12; text-align: left;">
+                        <h3 style="color: #f39c12; margin-bottom: 10px;">2. Luật tổng quát vẫn có thể overfit</h3>
+                        <p style="font-size: 0.95em;">Nhóm từng thêm 2 luật, viết <strong>hoàn toàn tổng quát</strong> — không chứa thực thể nào, tức đúng ràng buộc "không hard-code".</p>
+                        <p style="font-size: 0.95em;"><strong>Câu phản chứng:</strong> “Thủ đô của <strong>nước đó</strong> nằm ở đâu?” — hỏi <code>location</code> nhưng <code>country</code> chưa xác định, đúng ra phải ASK. Cả 2 luật đều <strong>nuốt mất</strong> câu hỏi lại này.</p>
+                        <table style="width:100%; font-size:0.8em; margin:12px 0; border-collapse:collapse;">
+                            <tr style="background:#2c3e50; color:#fff;"><th style="padding:8px;">Gỡ 2 luật ra</th><th style="padding:8px;">Ảnh hưởng</th></tr>
+                            <tr style="background:#fff;"><td style="padding:8px; text-align:center;">Tuned (đã dùng để chỉnh)</td><td style="padding:8px; text-align:center; color:#e74c3c;"><strong>−1 câu</strong></td></tr>
+                            <tr style="background:#f8f9fa;"><td style="padding:8px; text-align:center;">Held-out</td><td style="padding:8px; text-align:center; color:#27ae60;"><strong>không đổi</strong></td></tr>
+                            <tr style="background:#fff;"><td style="padding:8px; text-align:center;">Safety</td><td style="padding:8px; text-align:center; color:#27ae60;"><strong>không đổi</strong></td></tr>
+                        </table>
+                        <p style="font-size: 0.95em; margin-bottom:0;"><strong>Kết luận:</strong> toàn bộ giá trị của 2 luật nằm trên <em>chính bộ dữ liệu chúng được thiết kế dựa theo</em>, và <strong>bằng 0</strong> trên dữ liệu mới.</p>
+                    </div>
+                </div>
+                <p class="text-center fragment" style="margin-top:20px;"><strong>Bài học:</strong> ràng buộc "không hard-code" là <strong>cần nhưng chưa đủ</strong>. Một luật viết tổng quát vẫn là fit test nếu nó được <em>chọn</em> bằng cách xem nó sửa được câu nào. Muốn đủ thì phải có <strong>held-out set + câu phản chứng cho từng luật</strong>.</p>
+            </section>
+
+            <!-- ================= KẾT QUẢ & HẠN CHẾ ================= -->
+            
+            <!-- Slide 5.1: Kết quả Thực nghiệm -->
+            <section>
+                <h2>5. Kết quả Thực nghiệm</h2>
+                
+                <div class="flex-container" style="margin-top: 0; align-items: center;">
+                    <div class="col fragment" style="flex: 1.3;">
+                        <div class="chart-container" style="height: 550px;">
+                            <canvas id="resultsChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col fragment" style="flex: 1;">
+                        <ul style="margin-left: 20px; font-size: 0.92em;">
+                            <li><strong class="highlight-red">False Answer Rate:</strong> giảm <strong>2/3</strong> so với baseline — từ 0.402 xuống <strong>0.134</strong>.</li>
+                            <li><strong class="highlight-green">Precision:</strong> 0.530 &rarr; <strong>0.705</strong>. Đây là con số then chốt: nếu hệ chỉ <em>nhát hơn</em> thì precision sẽ <strong>không đổi</strong>. Nó tăng 33% ⇒ hệ <strong>phân biệt tốt hơn</strong>, không phải chỉ siết ngưỡng.</li>
+                            <li><strong class="highlight-blue">Balanced Accuracy:</strong> 0.513 &rarr; <strong>0.583</strong> — xác nhận đi <em>ra khỏi</em> đường trade-off cũ.</li>
+                            <li style="color:#7f8c8d;"><strong>Cái giá:</strong> Recall giảm 0.427 &rarr; 0.301; chi phí ~1.9× số lần gọi LLM, latency trung vị 11.7s &rarr; 24.8s.</li>
+                        </ul>
+                        <p style="font-size: 0.72em; color:#7f8c8d; margin-left: 20px;">Mẫu 200/2000 câu của test set đóng băng (103 trả lời được / 97 không), sai số ~±3.5 điểm %. Ghim model local, không fallback.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 5.2: Hạn chế & Hướng phát triển -->
+            <section>
+                <h2>Hạn chế và Hướng phát triển tương lai</h2>
+                
+                <div class="flex-container">
+                    <div class="col box fragment" style="text-align: left; background: #fff;">
+                        <h3 class="highlight-red">Vấn đề Tồn đọng (Hạn chế)</h3>
+                        <ul>
+                            <li><strong>Lỗi lọt (False Positives):</strong> Vẫn còn lọt 2 câu trả lời sai (Tỷ lệ lọt 30%). Nguyên nhân: Sự mất ổn định cố hữu của mô hình ngôn ngữ lớn (LLM).</li>
+                            <li><strong>Recall suy giảm:</strong> Việc bảo vệ quá chặt chẽ (đánh đổi lấy Precision) khiến hệ thống từ chối cả những câu nó có khả năng trả lời.</li>
+                            <li style="font-size: 0.85em; color: #7f8c8d;">*Phân rã 72 câu bỏ sót: <strong>34 câu</strong> do đáp án không hề có trong chunk nào retrieve được (giới hạn Retriever, chung cả 3 hệ); chỉ <strong>38 câu</strong> là do tầng kiểm tra quá chặt.</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="col box fragment" style="text-align: left; background: #eaf2f8;">
+                        <h3 class="highlight-blue">Roadmap Cải tiến</h3>
+                        <ul>
+                            <li><strong>Lấy mẫu nhất trí (self-consistency):</strong> Lỗi lọt <em>chập chờn</em> — cùng cặp thực thể, đổi cách hỏi thì lúc chặn lúc lọt. Hỏi model k lần và chỉ chấp nhận khi tất cả đồng ý sẽ <strong>giảm mạnh</strong> tỷ lệ lọt (chưa có bằng chứng triệt tiêu hoàn toàn).</li>
+                            <li><strong>Retrieval hai tầng:</strong> Retrieve rộng rồi rerank, <em>giữ nguyên</em> số chunk đưa vào LLM — vì nới thẳng top-k đã được đo là làm giảm kết quả.</li>
+                            <li><strong>Mở rộng:</strong> Áp dụng trên tập dataset lớn hơn (pháp lý, y tế) để đánh giá tính chịu tải thực tế.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= KẾT THÚC ================= -->
+            <section class="text-center">
+                <h1 style="font-size: 5em; font-weight: 700; color: #2980b9; margin-bottom: 30px;">Xin Cảm Ơn!</h1>
+                <h2 style="font-size: 1.8em; color: #7f8c8d; font-weight: 400;">Q&amp;A - Giải đáp thắc mắc</h2>
+            </section>
+            
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/plugin/highlight/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        // Khởi tạo Reveal.js cho 16:9 Layout (Full HD 1920x1080)
+        Reveal.initialize({
+            width: 1920,
+            height: 1080,
+            margin: 0.04,
+            minScale: 0.2,
+            maxScale: 2.0,
+            controls: true,
+            progress: true,
+            center: true,
+            hash: true,
+            transition: 'fade', // Chuyển cảnh mượt mà
+            plugins: [ RevealHighlight ]
+        });
+
+        // Cấu hình Font mặc định cho Chart.js
+        Chart.defaults.font.size = 22; 
+        Chart.defaults.font.family = "'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+        // Vẽ biểu đồ Bar Chart (Slide 5.1)
+        document.addEventListener('DOMContentLoaded', function() {
+            var ctxBar = document.getElementById('resultsChart');
+            if (ctxBar) {
+                new Chart(ctxBar.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Basic RAG', 'Prompt-Safe', 'PonyGuard'],
+                        datasets: [
+                            {
+                                label: 'Precision ↑',
+                                data: [0.530, 0.569, 0.705],
+                                backgroundColor: 'rgba(41, 128, 185, 0.8)',
+                                borderColor: 'rgba(41, 128, 185, 1)',
+                                borderWidth: 2,
+                                borderRadius: 6
+                            },
+                            {
+                                label: 'Balanced Accuracy ↑',
+                                data: [0.513, 0.539, 0.583],
+                                backgroundColor: 'rgba(46, 204, 113, 0.8)',
+                                borderColor: 'rgba(46, 204, 113, 1)',
+                                borderWidth: 2,
+                                borderRadius: 6
+                            },
+                            {
+                                label: 'False Answer Rate ↓',
+                                data: [0.402, 0.320, 0.134],
+                                backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                                borderColor: 'rgba(231, 76, 60, 1)',
+                                borderWidth: 2,
+                                borderRadius: 6
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'So sánh Metric 3 Hệ thống',
+                                font: { size: 32, weight: 'bold' },
+                                padding: { top: 10, bottom: 30 }
+                            },
+                            legend: {
+                                position: 'bottom',
+                                labels: { padding: 30, font: { size: 24 } }
+                            }
+                        },
+                        scales: {
+                            y: { beginAtZero: true, max: 1.0, ticks: { font: { size: 22 } } },
+                            x: { ticks: { font: { size: 26, weight: '600' } } }
+                        }
+                    }
+                });
+            }
+
+            // Vẽ biểu đồ Pie Chart (Slide 4.1)
+            var ctxPie = document.getElementById('pieChart');
+            if (ctxPie) {
+                new Chart(ctxPie.getContext('2d'), {
+                    type: 'pie',
+                    data: {
+                        labels: [
+                            'Tuned (26 câu)',
+                            'Held-out (10 câu)',
+                            'Safety (12 câu)'
+                        ],
+                        datasets: [{
+                            data: [26, 10, 12],
+                            backgroundColor: [
+                                'rgba(41, 128, 185, 0.8)', // Xanh dương
+                                'rgba(127, 140, 141, 0.8)', // Xám
+                                'rgba(231, 76, 60, 0.8)'  // Đỏ
+                            ],
+                            borderColor: [
+                                '#ffffff', '#ffffff', '#ffffff'
+                            ],
+                            borderWidth: 3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: { font: { size: 22 }, padding: 20 }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

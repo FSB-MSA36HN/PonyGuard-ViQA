@@ -9,12 +9,12 @@ const DECISION = {
   ABSTAIN: { label: "TỪ CHỐI", className: "abstain" },
 };
 
-function CopyButton({ value }) {
-  const [state, setState] = useState("Sao chép");
+function CopyButton({ value, label = "Sao chép" }) {
+  const [state, setState] = useState(label);
   return (
     <button
       type="button"
-      className="btn btn-ghost btn-small"
+      className="btn-ghost"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(value);
@@ -22,7 +22,7 @@ function CopyButton({ value }) {
         } catch {
           setState("Không sao chép được");
         }
-        setTimeout(() => setState("Sao chép"), 1400);
+        setTimeout(() => setState(label), 1400);
       }}
     >
       <Icon name="copy" size={13} /> {state}
@@ -41,6 +41,10 @@ export default function AssistantMessage({ message, onPickOption }) {
   const stages = Object.entries(performance.stages || {}).filter(([, value]) => value && typeof value === "object" && "ms" in value);
   const details = JSON.stringify({ timing: performance.stages || {}, trace }, null, 2);
   const options = prediction.decision === "ASK" ? requirements.clarification_options || [] : [];
+  const gaps = Array.isArray(coverage.coverage_gaps) ? coverage.coverage_gaps : coverage.coverage_gaps ? [coverage.coverage_gaps] : [];
+  const LABEL = { gemini: "Gemini", local: "Local" };
+  const providers = [...new Set(stages.map(([, value]) => value.provider).filter(Boolean))].map((name) => LABEL[name] || name);
+  const fallback = stages.map(([, value]) => value.fallback_reason).find(Boolean);
 
   return (
     <article className="message assistant">
@@ -52,8 +56,14 @@ export default function AssistantMessage({ message, onPickOption }) {
           <span className="pill">{system}</span>
           <span className={`decision ${decision.className}`}>{decision.label}</span>
         </div>
-        <div className="answer-text">{prediction.answer}</div>
+
+        <div className="answer-text">
+          {prediction.answer.split(/\n{2,}/).map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </div>
         {prediction.reason ? <p className="caption">{prediction.reason}</p> : null}
+        {fallback ? <p className="caption">Đã chuyển sang model cục bộ: {fallback}</p> : null}
 
         {options.length ? (
           <div className="chips">
@@ -77,9 +87,9 @@ export default function AssistantMessage({ message, onPickOption }) {
           </Collapsible>
         ) : null}
 
-        {prediction.decision === "ABSTAIN" && coverage.coverage_gaps ? (
+        {prediction.decision === "ABSTAIN" && gaps.length ? (
           <Collapsible title="Vì sao chưa trả lời">
-            <p>{coverage.reason_summary}</p>
+            {coverage.reason_summary ? <p style={{ marginTop: 0 }}>{coverage.reason_summary}</p> : null}
             {(coverage.supported_facts || []).map((fact) => (
               <div key={fact.chunk_id}>
                 <blockquote>{fact.text}</blockquote>
@@ -90,7 +100,7 @@ export default function AssistantMessage({ message, onPickOption }) {
               </div>
             ))}
             <ul className="gap-list">
-              {(Array.isArray(coverage.coverage_gaps) ? coverage.coverage_gaps : [coverage.coverage_gaps]).map((gap, index) => (
+              {gaps.map((gap, index) => (
                 <li key={index}>{gap}</li>
               ))}
             </ul>
@@ -115,13 +125,19 @@ export default function AssistantMessage({ message, onPickOption }) {
         <Collapsible title="Chi tiết kỹ thuật">
           <StageTimeline stages={stages.map(([name, value]) => ({ stage: name, label: name, ms: value.ms }))} running={false} />
           <div className="detail-actions">
-            <CopyButton value={details} />
+            <CopyButton value={details} label="Sao chép trace" />
           </div>
           <pre className="json">{details}</pre>
         </Collapsible>
 
         <div className="metrics">
-          {Math.round(performance.latency_ms)} ms · {performance.llm_calls} lượt gọi LLM · {performance.input_tokens + performance.output_tokens} token
+          <span>
+            {Math.round(performance.latency_ms)} ms · {performance.llm_calls} lượt gọi LLM · {performance.input_tokens + performance.output_tokens} token
+            {providers.length ? ` · ${providers.join(" → ")}` : ""}
+          </span>
+          <span className="message-actions">
+            <CopyButton value={prediction.answer} label="Sao chép" />
+          </span>
         </div>
       </div>
     </article>

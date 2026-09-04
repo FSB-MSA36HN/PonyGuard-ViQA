@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ponyguard_viqa.core import add_clarification, load_config  # noqa: E402
-from ponyguard_viqa.llm import build_llm, list_gemini_models  # noqa: E402
+from ponyguard_viqa.llm import build_llm  # noqa: E402
 from ponyguard_viqa.pipelines import BasicRAG, PonyGuard  # noqa: E402
 from ponyguard_viqa.retrieval import Embedder, Retriever  # noqa: E402
 
@@ -40,7 +40,9 @@ def retriever() -> Retriever:
 
 @lru_cache(maxsize=4)
 def llm(selected_model: str):
-    return build_llm(config()["model"], selected_model=selected_model)
+    # "auto" keeps the configured Gemini-first provider with its local fallback;
+    # anything else pins that provider for the whole request.
+    return build_llm(config()["model"], selected_model=None if selected_model == "auto" else selected_model)
 
 
 @lru_cache(maxsize=8)
@@ -50,11 +52,6 @@ def pipeline(system: str, selected_model: str):
     if system == "Basic RAG":
         return BasicRAG(retriever(), llm(selected_model), retrieval["top_k"], stage_tokens=stage_tokens)
     return PonyGuard(retriever(), llm(selected_model), retrieval["top_k"], stage_tokens=stage_tokens, intent_first=True)
-
-
-@lru_cache(maxsize=1)
-def gemini_models() -> tuple[str, ...]:
-    return tuple(list_gemini_models())
 
 
 def log_run(system: str, selected_model: str, result: dict) -> None:
@@ -71,7 +68,7 @@ def log_run(system: str, selected_model: str, result: dict) -> None:
 def run_stream(body: dict):
     """Yield {stage} events while the blocking pipeline runs, then {result}."""
     system = body.get("system", "PonyGuard")
-    selected_model = body.get("model", "local")
+    selected_model = body.get("model") or "auto"
     pending = body.get("pending_question") or ""
     typed = (body.get("question") or "").strip()
     question = add_clarification(pending, typed) if pending else typed
@@ -130,8 +127,9 @@ class Handler(BaseHTTPRequestHandler):
             model = config()["model"]
             self._send(200, json.dumps({
                 "systems": ["PonyGuard", "Basic RAG"],
-                "models": [*gemini_models(), "local"],
-                "default_model": model.get("gemini_model", "local"),
+                "models": ["auto", "local"],
+                "default_model": "auto",
+                "gemini_model": model.get("gemini_model", ""),
                 "local_model": model["name"],
             }).encode(), "application/json")
             return

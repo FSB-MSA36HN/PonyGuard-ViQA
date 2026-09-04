@@ -36,6 +36,9 @@ def test_complete_follow_up_question_replaces_an_incomplete_turn_but_short_conte
     assert resolved_question(add_clarification("Con lợn có?", "Con lợn có mấy chân?")) == "Con lợn có mấy chân?"
     assert "Mỹ" in resolved_question(add_clarification("Quốc khánh là ngày nào?", "Mỹ"))
 
+def test_selected_spelling_replaces_the_matching_unaccented_phrase():
+    assert resolved_question(add_clarification("Bào đốm là con gì?", "Báo đốm")) == "Báo đốm là con gì?"
+
 def test_claim_final_gate_removes_unsupported_or_abstains():
     claims = [{"text": "Đúng.", "label": "SUPPORTED"}, {"text": "Sai.", "label": "UNSUPPORTED"}]
     assert PonyGuard.final_gate(claims, "Đúng. Sai.") == ("ANSWER", "Đúng.")

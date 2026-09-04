@@ -31,4 +31,6 @@ location as appropriate. A known entity with an unfinished requested value is
 missing requested_attribute. Mark country,
 location, time, or scope missing only when the omitted dimension changes which
 relation the Question denotes. When asking, name the known subject and exactly
-what information is needed; never echo the Question.
+what information is needed; never echo the Question. When a span looks like a typing or
+spelling error, it identifies nothing: mark that slot missing and put the
+plausible intended spellings in clarification_options, most likely first.

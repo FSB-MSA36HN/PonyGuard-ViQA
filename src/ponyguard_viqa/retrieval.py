@@ -12,7 +12,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import numpy as np
 
-from .core import Chunk, normalize_text
+from .core import Chunk, normalize_text, undiacritic
 
 
 def chunk_text(text: str, size: int = 400, overlap: int = 50) -> list[str]:
@@ -41,6 +41,27 @@ class Retriever:
         self.documents = [json.loads(line) for line in Path(documents_path).open(encoding="utf-8") if line.strip()]
         self.embedder = embedder
         self.last_timing: dict[str, float] = {}
+        self._bare: list[str] | None = None
+
+    def documents_matching(self, bare_spans: set[str], limit: int = 20) -> list[Chunk]:
+        """Chunks whose text contains one of these spans ignoring diacritics.
+
+        Embedding search cannot find a word the question misspells, so a literal
+        scan is the only way to recover the corpus spelling. The stripped copy of
+        the corpus is built once, on the first question that needs it.
+        """
+        if not bare_spans:
+            return []
+        if self._bare is None:
+            self._bare = [undiacritic(doc["text"]).casefold() for doc in self.documents]
+        hits = []
+        for index, text in enumerate(self._bare):
+            if any(span in text for span in bare_spans):
+                doc = self.documents[index]
+                hits.append(Chunk(document_id=doc["document_id"], chunk_id=doc["chunk_id"], text=doc["text"]))
+                if len(hits) == limit:
+                    break
+        return hits
 
     def retrieve(self, question: str, top_k: int = 5) -> list[Chunk]:
         started = perf_counter()

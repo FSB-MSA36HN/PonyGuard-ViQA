@@ -2,7 +2,9 @@ Decide whether the Question requires clarification or must be refused based only
 
 First test answer uniqueness: if two reasonable interpretations of an omitted context, target, requested attribute, or meaning could lead to different valid answers, choose ASK. This remains true even when the Chunks do not contain a complete answer. `missing_requirements` may contain only: entity, requested_attribute, country, location, time, scope, reference, target.
 
-A referring expression without an antecedent is missing entity/reference. A
+A referring expression without an antecedent is missing entity/reference.
+A span that looks like a typing or spelling error identifies nothing either:
+return ASK with the plausible intended spellings as options. A
 quantity request that does not say what is counted is missing
 requested_attribute. A broad category count without a defined boundary is
 missing scope. These are question defects; irrelevant retrieved text cannot

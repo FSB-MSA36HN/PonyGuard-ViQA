@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -71,10 +72,23 @@ def add_clarification(question: str, clarification: str) -> str:
 
 
 def resolved_question(question: str) -> str:
-    """Use a complete follow-up question as the request, otherwise retain its context."""
-    _, marker, clarification = question.partition("\n\nThông tin làm rõ từ người dùng:")
+    """Use a complete follow-up or apply a selected spelling to its original question."""
+    original, marker, clarification = question.partition("\n\nThông tin làm rõ từ người dùng:")
     clarification = normalize_text(clarification)
-    return clarification if marker and clarification.endswith("?") else question
+    if not marker:
+        return question
+    if clarification.endswith("?"):
+        return clarification
+    choice = tokenise(clarification)
+    words = list(re.finditer(r"\w+", original, flags=re.UNICODE))
+    if len(choice) < 2:
+        return question
+    bare_choice = undiacritic(" ".join(choice)).casefold()
+    for index in range(len(words) - len(choice) + 1):
+        selected = words[index:index + len(choice)]
+        if undiacritic(" ".join(word.group() for word in selected)).casefold() == bare_choice:
+            return f"{original[:selected[0].start()]}{clarification}{original[selected[-1].end():]}"
+    return question
 
 
 def intent_slot_bindings(question: str, raw: Any, answer_type: str = "") -> tuple[list[dict[str, Any]], list[str]]:
@@ -108,6 +122,11 @@ def intent_slot_bindings(question: str, raw: Any, answer_type: str = "") -> tupl
         if (status == "REFERENTIAL" and literal) or (status == "ABSENT" and slot in REQUIRED_REQUIREMENT_SLOTS):
             unresolved.append(slot)
     return bindings, list(dict.fromkeys(unresolved))
+
+
+def undiacritic(value: str) -> str:
+    """The same letters without their marks, so a mistyped tone still matches."""
+    return "".join(mark for mark in unicodedata.normalize("NFD", value) if not unicodedata.combining(mark))
 
 
 def tokenise(value: str) -> list[str]:
@@ -151,6 +170,8 @@ class Requirement:
     time_scope: str = "UNSPECIFIED"
     inclusion_constraints: list[str] = field(default_factory=list)
     slot_bindings: list[dict[str, Any]] = field(default_factory=list)
+    # Source wordings that are one small edit from a span of the question.
+    spelling_alternatives: list[str] = field(default_factory=list)
 
 
 @dataclass

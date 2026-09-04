@@ -115,14 +115,18 @@ def test_unbound_slot_flood_is_still_suppressed():
     assert requirement.question_clear and not requirement.missing_requirements
 
 
-def test_intent_asks_before_retrieval_when_a_span_is_referential():
+def test_intent_asks_without_spending_an_evidence_call_when_a_span_is_referential():
+    """A validated ASK reads the sources (no model call) but never extracts evidence."""
+    from ponyguard_viqa.core import Chunk
+
     class Retriever:
         last_timing = {}
-        def retrieve(self, *_):
-            raise AssertionError("a validated ASK must not reach retrieval")
+        def retrieve(self, *_): return [Chunk("d", "d_1", "Dân số Hà Nội năm 2009 là 6,45 triệu người.")]
 
     class LLM:
+        def __init__(self): self.calls = 0
         def json(self, *_):
+            self.calls += 1
             return {
                 "entity": "Hà Nội", "requested_attribute": "dân số", "answer_type": "COUNT",
                 "question_complete": True, "missing_requirements": [],
@@ -135,11 +139,35 @@ def test_intent_asks_before_retrieval_when_a_span_is_referential():
         def generate(self, *_):
             return LLMResponse("Bạn muốn biết dân số Hà Nội vào thời điểm nào?", 1, 1, 1)
 
-    result = PonyGuard(Retriever(), LLM(), intent_first=True).run(
+    llm = LLM()
+    result = PonyGuard(Retriever(), llm, intent_first=True).run(
         {"sample_id": "referential-time", "question": "Dân số Hà Nội khi đó là bao nhiêu?", "gold_answers": [], "expected_action": "ASK"}
     )
     assert result["prediction"]["decision"] == "ASK"
     assert result["trace"]["requirements"]["missing_requirements"] == ["time"]
+    assert llm.calls == 1
+
+
+def test_ask_offers_the_source_spelling_for_a_mistyped_span():
+    """A misspelled span is clarified with the wording the sources use."""
+    from ponyguard_viqa.core import Chunk
+
+    chunks = [Chunk("d", "d_1", "Việt Nam có 63 tỉnh thành trên cả nước."), Chunk("d", "d_2", "Mỗi tỉnh thành có một trung tâm hành chính.")]
+    requirement = Requirement(missing_requirements=["entity"], clarification_options=["tình yêu", "cặp đôi"], clarification_question="Bạn hỏi về số lượng của gì?")
+    offered = PonyGuard.offer_spelling_alternatives(requirement, "có bao nhiêu tình thành?", chunks)
+    assert offered == ["tỉnh thành"]
+    assert requirement.clarification_question == "Ý bạn là tỉnh thành?"
+
+
+def test_a_correctly_spelled_question_gets_no_spelling_alternative():
+    from ponyguard_viqa.core import Chunk
+
+    chunks = [Chunk("d", "d_1", "Việt Nam có 63 tỉnh thành, thủ đô là Hà Nội.")]
+    assert PonyGuard.spelling_alternatives("Việt Nam có bao nhiêu tỉnh thành?", chunks) == []
+    assert PonyGuard.spelling_alternatives("Ông ấy sinh năm nào?", chunks) == []
+    # A merely similar word is not a spelling of the asked span.
+    other = [Chunk("d", "d_1", "Khu di tích Bình Thành nằm ở phía nam."), Chunk("d", "d_2", "Bình Thành là một xã nhỏ.")]
+    assert PonyGuard.spelling_alternatives("có bao nhiêu tình thành?", other) == []
 
 
 def test_intent_stays_clear_when_every_optional_dimension_is_absent():
@@ -279,3 +307,27 @@ def test_evidence_backed_audit_turns_a_bare_refusal_into_a_question():
     assert result["prediction"]["decision"] == "ASK"
     assert result["trace"]["requirements"]["missing_requirements"] == ["entity"]
     assert "đối tượng được hỏi" in result["prediction"]["reason"]
+
+
+def test_a_misspelled_question_asks_with_the_source_wording_instead_of_refusing():
+    """No support survived, but a source spells a question span almost identically."""
+    from ponyguard_viqa.core import Chunk
+
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return [Chunk("d", "d_1", "Việt Nam có 63 tỉnh thành trên cả nước."), Chunk("d", "d_2", "Mỗi tỉnh thành có một trung tâm hành chính.")]
+
+    class LLM:
+        def json(self, request, *_):
+            if "decision (ASK|ABSTAIN)" in request:
+                return {"decision": "ABSTAIN", "missing_requirements": [], "rationale": ""}, LLMResponse("{}", 1, 1, 1)
+            return {"entity": "tình thành", "requested_attribute": "số lượng", "answer_type": "COUNT",
+                    "question_complete": True, "missing_requirements": [], "support": []}, LLMResponse("{}", 1, 1, 1)
+        def generate(self, *_): return LLMResponse("", 1, 1, 1)
+
+    result = PonyGuard(Retriever(), LLM(), intent_first=True).run(
+        {"sample_id": "typo", "question": "có bao nhiêu tình thành?", "gold_answers": [], "expected_action": "ASK"}
+    )
+    assert result["prediction"]["decision"] == "ASK"
+    assert result["prediction"]["answer"] == "Ý bạn là tỉnh thành?"
+    assert "tỉnh thành" in result["prediction"]["reason"]

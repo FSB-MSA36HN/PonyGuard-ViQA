@@ -59,10 +59,16 @@ export default function Composer({ value, onChange, onSubmit, onStop, busy, pend
                 </button>
               ))}
             </div>
-            <select className="model-select" value={model} onChange={(event) => onModel(event.target.value)} aria-label="Model">
+            <select
+              className="model-select"
+              value={model}
+              onChange={(event) => onModel(event.target.value)}
+              aria-label="Nguồn model"
+              title={options.gemini_model ? `Tự động: ${options.gemini_model}, hết quota thì chuyển sang ${options.local_model}` : undefined}
+            >
               {(options.models || []).map((name) => (
                 <option key={name} value={name}>
-                  {name === "local" ? `Local · ${options.local_model || "MLX"}` : `Gemini · ${name}`}
+                  {name === "local" ? `Chỉ máy cục bộ · ${options.local_model || "MLX"}` : "Tự động"}
                 </option>
               ))}
             </select>

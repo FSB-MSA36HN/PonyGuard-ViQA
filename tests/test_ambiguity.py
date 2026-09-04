@@ -104,6 +104,28 @@ def test_legacy_chat_reply_matching_the_only_offered_option_also_resolves_it():
     assert requirement.question_clear and not requirement.missing_requirements
 
 
+def test_intent_first_does_not_ask_again_after_a_user_selects_a_spelling():
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return []
+
+    class LLM:
+        def __init__(self): self.calls, self.requests = 0, []
+        def json(self, request, *_):
+            self.calls += 1; self.requests.append(request)
+            if self.calls == 1:
+                return {"entity": "báo đốm", "requested_attribute": "loài", "missing_requirements": ["entity"]}, LLMResponse("{}", 1, 1, 1)
+            return {"support": [], "decision": None}, LLMResponse("{}", 1, 1, 1)
+
+    llm = LLM()
+    result = PonyGuard(Retriever(), llm, intent_first=True).run({
+        "sample_id": "selected-spelling", "question": add_clarification("Bào đốm là con gì?", "Báo đốm"),
+        "clarification_for": ["entity"], "gold_answers": [], "expected_action": "ABSTAIN",
+    })
+    assert result["prediction"]["decision"] != "ASK" and llm.calls > 1
+    assert "Question: Báo đốm là con gì?" in llm.requests[0]
+
+
 def test_adjudicator_cannot_reopen_a_slot_completed_by_the_user():
     class Retriever:
         last_timing = {}

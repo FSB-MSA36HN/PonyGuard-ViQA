@@ -222,3 +222,19 @@ blockquote { margin: 8px 0; padding: 9px 13px; border-left: 3px solid var(--acce
   .thread, .composer-wrap { padding-left: 14px; padding-right: 14px; }
   .bubble { max-width: 88%; }
 }
+
+.hide-desktop { display: none; }
+@media (max-width: 880px) { .hide-desktop { display: inline-grid; } }
+
+/* Editing a sent question */
+.message.user { align-items: center; }
+.edit-btn { opacity: 0; flex: none; transition: opacity 0.15s; }
+.message.user:hover .edit-btn, .edit-btn:focus-visible { opacity: 1; }
+.edit-btn:disabled { opacity: 0 !important; cursor: not-allowed; }
+.message.user.editing { display: block; }
+.edit-box { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 16px; padding: 12px 14px; box-shadow: var(--shadow); }
+.edit-box textarea { width: 100%; border: 0; outline: none; background: transparent; resize: none; line-height: 1.6; }
+.edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.btn-primary { border: 0; border-radius: 9px; background: var(--accent); color: #fff; padding: 6px 14px; font-size: 0.82rem; font-weight: 550; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.notice { color: var(--muted); font-size: 0.82rem; text-align: center; margin: 0; }
