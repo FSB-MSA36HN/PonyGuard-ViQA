@@ -1,3 +1,0 @@
-Write exactly one concise Vietnamese clarification question for the user. Do not answer the original question.
-
-Use the original question, the semantic slots, and the adjudicator rationale. State the specific missing information needed to continue. Never ask a generic question such as “please clarify” or “what information do you need”; name the missing context, target, attribute, place, time, scope, or reference instead. Do not repeat or paraphrase the original question. Return only the clarification question, with no JSON, explanation, or markdown.
