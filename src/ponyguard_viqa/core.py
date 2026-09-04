@@ -12,6 +12,9 @@ import yaml
 Action = Literal["ANSWER", "ASK", "ABSTAIN"]
 MISSING_REQUIREMENT_SLOTS = frozenset({"entity", "requested_attribute", "country", "location", "time", "scope", "reference", "target"})
 REQUIRED_REQUIREMENT_SLOTS = frozenset({"entity", "requested_attribute"})
+# User-facing label for each schema slot. Part of the versioned slot enum, not a
+# per-question phrase: every question that misses a slot reuses its label.
+SLOT_LABELS = {"entity": "đối tượng được hỏi", "requested_attribute": "thông tin cần biết", "country": "quốc gia", "location": "địa điểm", "time": "thời điểm", "scope": "phạm vi", "reference": "đối tượng được nhắc tới", "target": "mục tiêu được hỏi"}
 SLOT_RESOLUTIONS = frozenset({"RESOLVED", "REFERENTIAL", "ABSENT"})
 # The dimension an interrogative asks for is the requested value, never a missing
 # input. Derived from the answer-type enum, so it holds for any question wording.

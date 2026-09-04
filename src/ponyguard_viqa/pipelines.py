@@ -6,7 +6,7 @@ from time import perf_counter
 from pathlib import Path
 from typing import Any, Callable
 
-from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
+from .core import Action, Chunk, MISSING_REQUIREMENT_SLOTS, SLOT_LABELS, PonyGuardState, Requirement, answer_matches_quote, intent_slot_bindings, normalized_contains, normalize_text, resolved_question, tokenise
 from .llm import LocalLLM
 from .retrieval import Retriever
 
@@ -125,7 +125,7 @@ class PonyGuard:
         if value.get("_parse_error"):
             return None, response
         value["question_clear"] = value.get("question_complete") is True
-        requirement = Requirement(**{key: value.get(key) for key in Requirement.__dataclass_fields__ if key in value})
+        requirement = self.requirement_from(value)
         # Slot resolution is decided from literal question spans, never from the
         # model's global completeness judgement.
         requirement.slot_bindings, span_bound = intent_slot_bindings(question, value.get("slot_bindings"), requirement.answer_type)
@@ -183,9 +183,18 @@ class PonyGuard:
         subject = str(asked.get("subject", ""))
         if not subject:
             return True, response
+        source_subject, source_object = str(source.get("subject", "")), str(source.get("object", ""))
         # Only a strictly better match against the source's object is evidence of
         # a swap; a tie or missing span leaves the support alone.
-        return PonyGuard.span_overlap(subject, str(source.get("object", ""))) <= PonyGuard.span_overlap(subject, str(source.get("subject", ""))), response
+        if PonyGuard.span_overlap(subject, source_object) <= PonyGuard.span_overlap(subject, source_subject):
+            return True, response
+        # An identity question ("what is the capital of X?") puts the queried term
+        # on the source's object side by construction, because the relation is
+        # symmetric and the answer is its subject. That is not a role swap: in a
+        # genuine reversal the answer is neither participant.
+        answer = str(support.get("candidate_answer", ""))
+        identity = answer and PonyGuard.span_overlap(answer, source_subject) > PonyGuard.span_overlap(answer, source_object)
+        return bool(identity), response
 
     @staticmethod
     def is_inference(support: dict[str, Any]) -> bool:
@@ -226,6 +235,10 @@ class PonyGuard:
         # Multiple alleged gaps alongside an extracted entity+attribute are a
         # malformed intent contract. Defer them to the bounded clarity audit.
         if len(alleged) > 2 or (requirement.entity and requirement.requested_attribute and len(alleged) > 1):
+            alleged = []
+        # Offering the user an option the question already states contradicts the
+        # allegation: that dimension is not what leaves the question open.
+        if any(normalized_contains(question, option) for option in PonyGuard.valid_options(requirement.clarification_options)):
             alleged = []
         # A contract cannot both extract a slot and claim that same slot is absent.
         if requirement.entity and normalized_contains(question, requirement.entity):
@@ -321,6 +334,15 @@ class PonyGuard:
         return value
 
     @staticmethod
+    def requirement_from(value: dict[str, Any]) -> Requirement:
+        """A model may return one string where the schema requests a list of slots."""
+        fields = {key: value.get(key) for key in Requirement.__dataclass_fields__ if key in value}
+        for key in ("missing_requirements", "clarification_options", "inclusion_constraints"):
+            if key in fields:
+                fields[key] = PonyGuard.text_items(fields[key])
+        return Requirement(**fields)
+
+    @staticmethod
     def text_items(value: Any) -> list[str]:
         """LLMs sometimes return one string where the schema requests a list."""
         values = [value] if isinstance(value, str) else value if isinstance(value, list) else []
@@ -328,13 +350,19 @@ class PonyGuard:
 
     @staticmethod
     def decision_rationale(requirement: Requirement, evidence: dict[str, Any], decision: Action) -> str:
-        if decision == "ASK": return f"Thiếu thông tin bắt buộc: {', '.join(requirement.missing_requirements)}."
+        target = PonyGuard.requested_target(requirement)
+        if decision == "ASK":
+            slots = ", ".join(SLOT_LABELS.get(slot, slot) for slot in requirement.missing_requirements)
+            asked = f" khi hỏi về {requirement.requested_attribute}" if requirement.requested_attribute else ""
+            return f"Câu hỏi chưa xác định {slots}{asked}." if slots else "Câu hỏi còn thiếu thông tin bắt buộc."
         if decision == "ANSWER": return str(evidence.get("decision_rationale") or "Evidence đáp ứng entity, thuộc tính và mức suy luận cho phép.")
         if evidence.get("conflict_detected"): return "Các chunks có evidence mâu thuẫn."
         gaps = PonyGuard.text_items(evidence.get("coverage_gaps"))
         if gaps: return str(gaps[0])
         missing = evidence.get("missing_evidence") or []
-        return str(evidence.get("decision_rationale") or (f"Evidence chưa đủ: {', '.join(missing)}." if missing else "Retrieved evidence chưa đủ để trả lời an toàn."))
+        if missing: return str(evidence.get("decision_rationale") or f"Evidence chưa đủ: {', '.join(missing)}.")
+        fallback = f"Các đoạn đã truy hồi không nêu {target}." if target else "Retrieved evidence chưa đủ để trả lời an toàn."
+        return str(evidence.get("decision_rationale") or fallback)
 
     @staticmethod
     def final_gate(claims: list[dict[str, Any]], draft_answer: str) -> tuple[Action, str]:
@@ -371,6 +399,14 @@ class PonyGuard:
         return "Bạn có thể làm rõ chính xác thông tin cần hỏi không?"
 
     @staticmethod
+    def requested_target(requirement: Requirement) -> str:
+        """What the question asked for, in its own words, for user-facing reasons."""
+        entity = normalize_text(str(requirement.entity or ""))
+        attribute = normalize_text(str(requirement.requested_attribute or ""))
+        if attribute and entity: return f"{attribute} của {entity}"
+        return attribute or entity
+
+    @staticmethod
     def coverage_probe_queries(requirement: Requirement, question: str) -> list[str]:
         base = " ".join(part for part in (requirement.entity, requirement.requested_attribute) if part) or question
         return [base] if requirement.time_scope != "UNSPECIFIED" or requirement.population_scope != "UNSPECIFIED" else []
@@ -379,7 +415,9 @@ class PonyGuard:
     def grounded_refusal(requirement: Requirement, evidence: dict[str, Any]) -> dict[str, Any]:
         supports = evidence.get("valid_supports", [])
         observations = evidence.get("valid_observations", [])
-        facts = [{"chunk_id": item["chunk_id"], "text": item["evidence_quote"], "limitation": item.get("limitation", "")} for item in (supports or observations)[:2]]
+        target = PonyGuard.requested_target(requirement)
+        derived_limitation = f"Đoạn này không nêu {target}." if target else ""
+        facts = [{"chunk_id": item["chunk_id"], "text": item["evidence_quote"], "limitation": item.get("limitation") or derived_limitation} for item in (supports or observations)[:2]]
         gaps = PonyGuard.text_items(evidence.get("coverage_gaps"))
         if evidence.get("_parse_error"):
             gaps.insert(0, "Không thể kiểm chứng semantic evidence vì model trả output không hợp lệ.")
@@ -394,18 +432,19 @@ class PonyGuard:
             gaps.append("Thời gian trong evidence không khớp thời gian được hỏi.")
         if requirement.population_scope != "UNSPECIFIED" and not any(item.get("matches_population") is True for item in supports):
             gaps.append("Evidence không xác nhận toàn bộ phạm vi/nhóm đối tượng được hỏi.")
-        gaps = list(dict.fromkeys(gaps)) or ["Các nguồn đã truy xuất không chứa evidence đã kiểm chứng cho yêu cầu này."]
+        default_gap = f"Các đoạn đã truy hồi không nêu {target}." if target else "Các nguồn đã truy xuất không chứa evidence đã kiểm chứng cho yêu cầu này."
+        gaps = list(dict.fromkeys(gaps)) or [default_gap]
         partial = supports[0].get("candidate_answer") if supports else ""
         rephrase = f"Nếu bạn muốn phạm vi hẹp hơn mà tài liệu nêu, có thể hỏi về {partial}." if partial else "Bạn có thể nêu phạm vi hoặc mốc thời gian hẹp hơn nếu phù hợp."
         lines = ["Tôi chưa thể trả lời từ các nguồn đã truy xuất."]
         if facts:
             lines.append("Nguồn đã tìm thấy: " + " ".join(f"“{item['text']}” [{item['chunk_id']}]" for item in facts))
-            limitations = [str(item["limitation"]) for item in facts if item.get("limitation")]
+            # A recorded gap is more specific than a per-quote limitation, so it
+            # leads. The slot-derived limitation says the same as the default gap,
+            # so only a limitation the extractor itself stated is worth repeating.
+            limitations = [str(item["limitation"]) for item in facts if item.get("limitation") and item["limitation"] != derived_limitation]
             if limitations:
-                gaps = limitations + gaps
-            elif gaps == ["Các nguồn đã truy xuất không chứa evidence đã kiểm chứng cho yêu cầu này."]:
-                target = " ".join(part for part in (requirement.requested_attribute, requirement.entity) if part) or "yêu cầu được hỏi"
-                gaps = [f"Các đoạn trên không có trích dẫn trực tiếp xác lập {target}."]
+                gaps = list(dict.fromkeys(gaps + limitations))
         lines.append("Lý do: " + " ".join(gaps))
         lines.append("Điều này cho thấy evidence đã retrieve chưa đủ; không khẳng định toàn bộ corpus không có thông tin.")
         lines.append(rephrase)
@@ -476,7 +515,7 @@ class PonyGuard:
             requirement_json, response = _timed_json(self.llm, "requirement_recovery", f"{prompt('requirement_recovery_v1.txt')}\nQuestion: {sample['question']}", self.stage_tokens["requirement"], timings); stats.append(response)
             evidence_json["requirement_recovery"] = {"applied": not requirement_json.get("_parse_error"), "parse_error": bool(requirement_json.get("_parse_error")), "semantic_incomplete": semantic_incomplete}
         recovery_failed = bool(requirement_json.get("_parse_error"))
-        requirement = intent_requirement or Requirement(**{key: requirement_json.get(key) for key in Requirement.__dataclass_fields__ if key in requirement_json})
+        requirement = intent_requirement or self.requirement_from(requirement_json)
         clarified_slots = sample.get("clarification_for", [])
         if intent_requirement:
             requirement = intent_requirement
@@ -502,6 +541,10 @@ class PonyGuard:
             evidence_json.update({"entity_match": True, "attribute_match": True, "inference_level": level, "reasoning_allowed": True})
         if supports and semantic_incomplete:
             evidence_json.update({"entity_match": True, "attribute_match": True, "inference_level": "DIRECT", "reasoning_allowed": True, "answerable_from_evidence": True, "evidence_sufficient": True})
+        # Recovery re-queries and adds new chunks before re-extracting, so it can
+        # repair a wrong CONTRADICTED verdict from the first pass as well as an
+        # empty one. Gating it on the first pass's rejection reason was measured
+        # to cost a correct answer, so it runs unconditionally here.
         if self.intent_first and not requirement.missing_requirements and not supports and not resolved_follow_up:
             query = " ".join(part for part in (requirement.entity, requirement.requested_attribute) if part)
             retry_chunks = self.retriever.retrieve(query or sample["question"], self.top_k)
@@ -516,15 +559,16 @@ class PonyGuard:
                 supports = recovered_supports
                 level = "SIMPLE_INFERENCE" if any(item.get("support_type") == "SIMPLE_INFERENCE" for item in supports) else "DIRECT"
                 evidence_json.update({"valid_supports": supports, "entity_match": True, "attribute_match": True, "inference_level": level, "reasoning_allowed": True, "answerable_from_evidence": True, "evidence_sufficient": True})
-        # Intent owns the ASK decision on its own path, so the question-only audit
-        # there is redundant: it ran on 16 of 36 diagnostic questions and returned
-        # no decision on any of them. The evidence-backed adjudicator is retained
-        # for the path where intent does not run first.
-        if not self.intent_first and not requirement.missing_requirements and not supports and not resolved_follow_up and not evidence_json.get("_parse_error"):
+        # Intent judges the question alone, so it cannot see that a slot is
+        # under-specified only in the light of what was retrieved (a pronoun with
+        # several candidate antecedents in the sources). When nothing survived
+        # validation, the evidence-backed adjudicator decides between asking and
+        # refusing on both paths, instead of every such question refusing.
+        if not requirement.missing_requirements and not supports and not resolved_follow_up and not evidence_json.get("_parse_error"):
             report(progress, "understand", "Deciding whether clarification is needed")
             audit_prompt = f"{prompt('clarification_adjudicator_v3.txt')}\nQuestion: {sample['question']}\nChunks:\n{context(chunks)}"
             audit_json, response = _timed_json(self.llm, "clarification_adjudication", audit_prompt, self.stage_tokens["requirement"], timings); stats.append(response)
-            audit_requirement = self.apply_user_clarification(sample["question"], self.apply_clarity_guard(sample["question"], Requirement(**{key: audit_json.get(key) for key in Requirement.__dataclass_fields__ if key in audit_json})), clarified_slots)
+            audit_requirement = self.apply_user_clarification(sample["question"], self.apply_clarity_guard(sample["question"], self.requirement_from(audit_json)), clarified_slots)
             audit_accepted = audit_json.get("decision") == "ASK" and bool(audit_requirement.missing_requirements)
             if audit_accepted:
                 audit_requirement = self.make_ask_safe(audit_requirement)
@@ -744,9 +788,9 @@ class PonyGuard:
             candidate = normalize_text(str(support.get("candidate_answer", "")))
             if not chunk or not candidate or not normalized_contains(chunk.text, candidate):
                 continue
-            numbers = re.findall(r"\d+(?:[.,]\d+)*", chunk.text)
-            limitation = "Đoạn này có nhiều số liệu riêng nhưng không nêu một tổng số duy nhất." if len(set(numbers)) > 1 else "Đoạn này nêu một số liệu liên quan nhưng chưa xác lập đầy đủ yêu cầu."
-            valid.append({"chunk_id": chunk.chunk_id, "evidence_quote": PonyGuard.source_excerpt_around(chunk.text, candidate), "limitation": limitation})
+            # The limitation names what the question asked for, so it is written
+            # in grounded_refusal where the requirement slots are available.
+            valid.append({"chunk_id": chunk.chunk_id, "evidence_quote": PonyGuard.source_excerpt_around(chunk.text, candidate), "limitation": ""})
             if len(valid) == 2:
                 return valid
         for observation in evidence.get("retrieved_observations", []):

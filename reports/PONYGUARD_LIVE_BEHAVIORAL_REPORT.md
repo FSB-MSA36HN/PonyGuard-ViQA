@@ -3,15 +3,15 @@
 ## Summary
 
 - Cases executed: 26/26
-- Passed: 19
-- Failed: 7
+- Passed: 18
+- Failed: 8
 - Missing outputs: 0
 
 ## Per-case results
 
 | Category | Expected | Actual | Result | Detail |
 | --- | --- | --- | --- | --- |
-| ANSWER / direct numeric / paraphrase | ANSWER | ANSWER | PASS | pass |
+| ANSWER / direct numeric / paraphrase | ANSWER | ABSTAIN | FAIL | action expected ANSWER, got ABSTAIN |
 | ANSWER / direct person | ANSWER | ABSTAIN | FAIL | action expected ANSWER, got ABSTAIN |
 | ANSWER / direct date / paraphrase | ANSWER | ANSWER | PASS | pass |
 | ANSWER / direct location / paraphrase | ANSWER | ANSWER | PASS | pass |

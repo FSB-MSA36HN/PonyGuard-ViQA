@@ -1,0 +1,903 @@
+%==============================================================================
+%  PonyGuard-ViQA — Final Project Report
+%  IEEEtran conference format
+%
+%  Recommended build (handles the Vietnamese example strings natively):
+%      xelatex ponyguard_report.tex
+%      xelatex ponyguard_report.tex
+%
+%  pdfLaTeX also works (T5 encoding is loaded last so it becomes the default):
+%      pdflatex ponyguard_report.tex   (run twice for cross-references)
+%==============================================================================
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{listings}
+
+% --- Compiler-aware setup: Vietnamese example strings must render correctly ---
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1,T5]{fontenc}   % T5 last => default encoding, required for Vietnamese
+  \usepackage[utf8]{inputenc}
+\else
+  \usepackage{fontspec}
+  \setmainfont{Latin Modern Roman}
+  \setsansfont{Latin Modern Sans}
+  \setmonofont{Latin Modern Mono}
+\fi
+
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\lstdefinestyle{contract}{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framesep=3pt,
+  xleftmargin=2pt,
+  aboveskip=6pt,
+  belowskip=6pt,
+  keepspaces=true
+}
+
+\newcommand{\ACT}[1]{\textsc{#1}}
+
+\begin{document}
+
+%==============================================================================
+\title{PonyGuard-ViQA: Deterministic Answer Validation\\
+for Selective Vietnamese Question Answering\\
+\large\textbf{Final Project Report}}
+
+\author{
+\IEEEauthorblockN{To Thanh Hai\quad Do Quang Hiep\quad Pham Ngoc Hoa\quad
+Ngo Anh Duc\quad Trinh Duc Duong}
+\IEEEauthorblockA{\textit{Group 3} --- \textit{Deep Learning Course}\\
+\textit{M.Sc. Programme}, Vietnam}
+}
+
+\maketitle
+
+%==============================================================================
+\begin{abstract}
+Retrieval-augmented generation (RAG) systems share a structural weakness: they
+\emph{always} produce an answer. When the retrieved passages do not contain the
+answer, when the question is underspecified, or when the question carries a false
+presupposition, the model still emits a fluent response supported by a valid
+citation. This is the most damaging form of hallucination precisely because it
+exhibits no surface cue that would prompt a user to doubt it. We present
+PonyGuard-ViQA, an architecture in which the \emph{decision to accept an answer
+is made by deterministic code} rather than by the language model, which is
+restricted to extraction and proposal. The system emits one of three actions ---
+\ACT{answer}, \ACT{ask}, or \ACT{abstain} --- each gated by a machine-checkable
+condition. On UIT-ViQuAD~2.0, PonyGuard reduces the rate of answering questions
+that should be refused from $0.402$ to $0.134$ relative to a RAG baseline, while
+raising conditional precision from $0.530$ to $0.705$ and balanced accuracy from
+$0.513$ to $0.583$. The simultaneous rise in precision indicates that the gain
+stems from improved \emph{discrimination} rather than from a uniformly more
+conservative decision threshold. We further report four methodological findings,
+including a category error in the verification stage that rendered an otherwise
+correct arithmetic validator unreachable, and a quantitative demonstration of
+overfitting at the level of rule design.
+\end{abstract}
+
+\begin{IEEEkeywords}
+question answering, retrieval-augmented generation, abstention, selective
+prediction, hallucination, answer validation, Vietnamese NLP
+\end{IEEEkeywords}
+
+%==============================================================================
+\section{Introduction}
+
+\subsection{Motivation}
+
+Contemporary RAG systems are evaluated primarily on answer accuracy. This
+evaluation protocol implicitly assumes that \emph{every question ought to be
+answered} --- an assumption that does not hold in deployment. At least three
+situations call for withholding an answer:
+
+\begin{enumerate}
+  \item the retrieved passages do not contain the answer;
+  \item the question lacks the information needed to identify its referent;
+  \item the question presupposes a fact the corpus does not support.
+\end{enumerate}
+
+These three situations demand different responses. Case~(2) warrants a
+\emph{clarification request}; cases~(1) and~(3) warrant \emph{refusal}. Conflating
+them is a design error: asking the user for clarification does not remedy missing
+corpus coverage, and conversely, refusing an underspecified question outright
+discards the case in which a single additional detail would make it answerable.
+
+\subsection{A motivating failure}
+\label{sec:motivating}
+
+Consider the question \emph{``Tập đoàn Lend Lease được Làng Olympic xây dựng ở
+đâu?''} (``Where was the Lend Lease Group built by the Olympic Village?'')
+against the source passage \emph{``Làng Olympic nằm ở Thung lũng Lower Lea do tập
+đoàn Lend Lease xây dựng''} (``The Olympic Village is located in the Lower Lea
+Valley, built by the Lend Lease Group''). The question has \textbf{inverted the
+subject and object roles}. An intermediate version of our system answered
+\emph{``Thung lũng Lower Lea''}, and this answer satisfied every surface
+constraint:
+
+\begin{itemize}
+  \item the queried entity \emph{appears} in the source passage;
+  \item the evidence quote is \emph{verbatim};
+  \item the answer value \emph{occurs within} that quote;
+  \item the citation points to the correct chunk.
+\end{itemize}
+
+The error lies entirely in predicate--argument structure --- the level at which
+string matching is blind. We use this case as a diagnostic probe throughout the
+report.
+
+\subsection{Asymmetric error cost}
+
+In medical, legal, and policy retrieval, the two error types are not
+interchangeable. An unnecessary refusal costs the user a manual lookup: the
+damage is bounded and \emph{observable}. A confidently wrong answer accompanied by
+a citation is acted upon: the damage is unbounded and \emph{silent}. Our
+objective function is therefore not mean accuracy, but minimising the second
+error type subject to retaining acceptable coverage.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item A QA architecture that places the \textbf{answer-acceptance decision in
+        deterministic code}, using the language model only for extraction and
+        proposal, together with empirical evidence that the resulting gain comes
+        from improved discrimination rather than increased conservatism
+        (Section~\ref{sec:discrimination}).
+  \item The identification of a \textbf{category error in verifying derived
+        relations}: applying a direct-verification criterion to a relation that
+        is inferred rather than stated can never succeed. We propose an
+        alternative proof path based on per-operand verification and in-code
+        recomputation (Section~\ref{sec:finding-category}).
+  \item An \textbf{evaluation protocol designed against self-deception}:
+        separated tuned / held-out / safety suites, positive controls that defeat
+        a degenerate always-refuse system, and a mandatory falsifier for every
+        rule --- accompanied by a quantitative demonstration of overfitting at
+        the level of rule design (Section~\ref{sec:finding-overfit}).
+\end{enumerate}
+
+%==============================================================================
+\section{Problem Formulation}
+\label{sec:formulation}
+
+Given a question $q$ and a corpus $\mathcal{C}$, the system returns a triple
+$(a, c, e)$ where $a$ is the action, $c \subseteq \mathcal{C}$ is the set of cited
+chunks, and $e$ is a verbatim evidence quote:
+\begin{equation}
+a \in \{\ACT{answer},\ \ACT{ask},\ \ACT{abstain}\}.
+\end{equation}
+
+The action \ACT{answer} is admissible only when five conditions hold
+\emph{simultaneously}:
+\begin{align}
+&C_1:\ e \text{ occurs verbatim in some } d \in c \label{eq:c1}\\
+&C_2:\ \text{the answer value occurs within } e \label{eq:c2}\\
+&C_3:\ \text{the queried entity binds to both } q \text{ and } d \label{eq:c3}\\
+&C_4:\ d \text{ establishes the queried relation} \label{eq:c4}\\
+&C_5:\ \text{the relation direction in } d \text{ matches that in } q \label{eq:c5}
+\end{align}
+
+The action \ACT{ask} is selected when some required semantic slot is left
+undetermined by \emph{$q$ itself}. We stress that this condition
+\textbf{does not reference $\mathcal{C}$}. This is a deliberate design decision,
+analysed in Section~\ref{sec:intent}. \ACT{abstain} is the default action when no
+condition above is met.
+
+Crucially, $C_1$ through $C_5$ are evaluated by code operating on strings and
+structured records, not by thresholding a model confidence score.
+
+%==============================================================================
+\section{Related Work}
+
+This work sits at the intersection of three lines of research.
+
+\textbf{Selective prediction and learning to defer} study models that decline to
+predict when confidence is low, typically via calibrated output probabilities or
+a learned rejector~\cite{selective}. These methods operate on a scalar confidence
+signal; our acceptance conditions are symbolic and verifiable, and no confidence
+threshold appears anywhere in the decision path.
+
+\textbf{Faithfulness and attribution in RAG} address whether a generated answer is
+actually supported by the retrieved context, commonly measured by entailment
+between answer and evidence~\cite{rag,attribution}. Our $C_1$--$C_3$ enforce a
+stricter, syntactic form of attribution --- verbatim quote containment and
+literal answer--quote inclusion --- which is cheap and admits no partial credit.
+
+\textbf{Ambiguous question detection} concerns recognising questions with multiple
+valid interpretations and generating clarification requests~\cite{ambigqa}. Our
+contribution here is the separation of \ACT{ask} from \ACT{abstain} according to
+\emph{where} the deficiency lies --- in the question or in the corpus --- a
+distinction most abstention systems collapse.
+
+The distinguishing property of our approach is that model confidence is never
+used as a decision signal. Every acceptance condition is a deterministic check;
+the language model contributes candidate spans and structured proposals, and the
+final gate is code.
+
+%==============================================================================
+\section{Method}
+
+\subsection{Design principle}
+
+The architecture follows a single principle: \textbf{the language model proposes,
+code decides}. The model performs extraction and proposal; acceptance and
+rejection are executed by validation code.
+
+The rationale is empirical rather than ideological. We observed that model
+judgements are \emph{unstable under paraphrase}: the same entity pair, presented
+with two different surface realisations, yields two different verdicts
+(Section~\ref{sec:limitations}). Deterministic checks, by construction, return
+identical results for identical inputs. The safety guarantee is therefore built
+on the deterministic substrate rather than on the stochastic one.
+Figure~\ref{fig:pipeline} summarises the pipeline.
+
+\begin{figure}[t]
+\centering
+\begin{lstlisting}[style=contract]
+q --> [1] Intent --(missing slot)--> ASK
+       |
+       +-(clear)-> [2] Retrieve -> [3] Extract -> [4] Relation verify
+                                                        |
+                          +-----------------------------+
+                          v
+                 [5] Deterministic checks --(fail)--> ABSTAIN
+                          |
+                          +-> [5b] Arithmetic proof (inference only)
+                          +-> [5c] Relation direction check
+                          v
+                     Locked answer plan --> ANSWER
+\end{lstlisting}
+\caption{PonyGuard pipeline. The \ACT{ask} decision is made before retrieval;
+every path leading to \ACT{answer} passes through deterministic validation.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Stage 1 --- Pre-retrieval intent analysis}
+\label{sec:intent}
+
+This stage runs \emph{before} retrieval. The rationale is that a post-retrieval
+\ACT{ask} decision would cause the system to request clarification merely because
+no supporting evidence was found --- but absent evidence is the trigger for
+\ACT{abstain}, not for \ACT{ask}. Placing the decision before retrieval makes the
+two conditions structurally independent.
+
+The output contract requires, for \emph{each} semantic slot:
+
+\begin{lstlisting}[style=contract]
+{"slot":   "entity | requested_attribute | country |
+            location | time | scope | reference | target",
+ "span":   "<substring copied verbatim from the question>",
+ "status": "RESOLVED | REFERENTIAL | ABSENT"}
+\end{lstlisting}
+
+Validation code then checks that (i)~\texttt{span} is genuinely a substring of the
+question under whitespace and case normalisation; (ii)~\texttt{status} belongs to
+the closed enumeration; and (iii)~\emph{computes} the completeness verdict itself.
+The model is \textbf{not permitted} to declare the question complete.
+
+The critical distinction is between the last two labels. \texttt{ABSENT} means the
+question imposes no constraint along that dimension --- the ordinary case.
+\texttt{REFERENTIAL} means the question refers to the dimension without fixing it
+--- the case requiring clarification. Collapsing the two would cause the system to
+request clarification whenever a question omits a year or a country, even where
+those are irrelevant.
+
+The stage is deliberately \emph{fail-safe against spurious refusal}: a malformed
+contract, a non-matching span, or \texttt{ABSENT} on an optional dimension all
+yield no \ACT{ask}. The stage can only convert \ACT{abstain} $\rightarrow$
+\ACT{ask} when the model supplies a verbatim span and labels it unresolved.
+
+\subsection{Stages 2--3 --- Retrieval and constrained extraction}
+
+Retrieval uses FAISS~\cite{faiss} over \texttt{multilingual-e5-small}
+embeddings~\cite{e5} with $k=5$. Each extracted evidence record must carry a chunk
+identifier, a verbatim quote, a candidate answer value, a support type
+(\texttt{DIRECT} or \texttt{SIMPLE\_INFERENCE}), and entity spans in both the
+question and the source. The contract forbids paraphrase and forbids joining
+information not present in the retrieved text.
+
+\subsection{Stage 4 --- Relation verification}
+
+This stage emits one of three labels:
+\begin{itemize}
+  \item \texttt{CONTRADICTED}: the source states a different entity, attribute,
+        agent--patient direction, quantity type, or scope;
+  \item \texttt{UNSTATED}: a required presupposition is absent, or a reference is
+        unresolved;
+  \item \texttt{MATCH}: the full queried relation, including direction and scope,
+        is established.
+\end{itemize}
+Only \texttt{MATCH} admits a \texttt{DIRECT} support.
+
+\subsection{Stage 5 --- Deterministic validation}
+\label{sec:code-checks}
+
+This is where the decision is actually made. The checks execute sequentially and
+all must pass (Table~\ref{tab:checks}).
+
+\begin{table}[t]
+\caption{Deterministic validation chain (Stage 5)}
+\label{tab:checks}
+\centering
+\footnotesize
+\begin{tabular}{@{}clp{2.9cm}@{}}
+\toprule
+\# & Check & Rejects \\
+\midrule
+1 & Cited chunk exists in the retrieved set & fabricated chunk id \\
+2 & Quote occurs verbatim in that chunk & paraphrase \\
+3 & Presupposition status is \texttt{SUPPORTED} & false premise \\
+4 & Attribute and relation match & off-target answer \\
+5 & Answer value occurs within the quote & fabricated figure \\
+6 & Entity binds to both question and source & entity confusion \\
+7 & Answer is not a restatement of the question & vacuous answer \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Answer-plan locking.} Once a \texttt{DIRECT} support passes all seven
+checks, the triple (answer, quote, citation) is locked. The downstream generation
+stage may rephrase it but may not replace or discard it. This constraint
+eliminates a failure mode we observed during development, in which already
+validated evidence was corrupted by the answer-writing stage.
+
+\subsection{Stage 5b --- Bounded inference proof}
+\label{sec:proof}
+
+For \texttt{SIMPLE\_INFERENCE} supports the contract requires:
+
+\begin{lstlisting}[style=contract]
+{"operation": "sum | difference | ratio",
+ "operands": [{"value": "...", "chunk_id": "...",
+               "evidence_quote": "..."},
+              {"value": "...", "chunk_id": "...",
+               "evidence_quote": "..."}],
+ "result": "...", "unit": "..."}
+\end{lstlisting}
+
+Code verifies that each operand cites a real chunk, quotes it verbatim, that its
+value occurs within that quote, and that the operand binds to the question; the
+operation is then \emph{recomputed in code} and compared against \texttt{result}
+under a relative tolerance. Section~\ref{sec:finding-category} explains why this
+stage must bypass composed-relation verification entirely.
+
+\subsection{Stage 5c --- Relation direction check}
+\label{sec:direction}
+
+This stage runs only on the branch about to answer. The model extracts a
+(subject, relation, object) triple for the question and for the source; code
+compares them by normalised literal token overlap. Let $s_q$ denote the question
+subject, $s_d$ and $o_d$ the source subject and object, and
+$\mathrm{ov}(\cdot,\cdot)$ the normalised overlap. The support is rejected when
+\begin{equation}
+\mathrm{ov}(s_q, o_d) > \mathrm{ov}(s_q, s_d),
+\label{eq:direction}
+\end{equation}
+that is, when the question's subject aligns better with the source's object than
+with its subject. Ties and missing spans retain the support, preserving the
+fail-safe-against-spurious-refusal property.
+
+%==============================================================================
+\section{Experimental Setup}
+
+\subsection{Systems compared}
+
+\begin{itemize}
+  \item \textbf{Basic RAG} --- retrieve then generate. Baseline.
+  \item \textbf{Prompt-Safe RAG} --- identical, but the prompt instructs the model
+        to refuse when evidence is insufficient. This represents the prevailing
+        practice of aligning refusal behaviour through instructions.
+  \item \textbf{PonyGuard} --- the architecture described above.
+\end{itemize}
+
+All three share the \emph{same corpus, retriever, $k$, output schema, and base
+model}, differing only in the validation mechanism. This isolates the variable of
+interest and licenses causal attribution of the observed differences: the
+1--2 comparison answers \emph{is prompting sufficient}, and the 2--3 comparison
+answers \emph{what does structured validation add}.
+
+\subsection{Data and configuration}
+
+\begin{table}[t]
+\caption{Experimental configuration}
+\label{tab:setup}
+\centering
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+Component & Configuration \\
+\midrule
+Dataset       & UIT-ViQuAD 2.0~\cite{viquad}, frozen split, hash-verified \\
+Corpus        & 5{,}442 chunks, 400 tokens, 50 overlap \\
+Embedding     & \texttt{intfloat/multilingual-e5-small}~\cite{e5} \\
+Index         & FAISS~\cite{faiss}, $k = 5$ \\
+Base model    & \texttt{Qwen3-8B}~\cite{qwen} (MLX, 4-bit), temperature 0 \\
+Evaluation    & 200 questions (103 answerable / 97 unanswerable) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Methodological note.} An automatic provider-fallback mechanism silently
+substituted a different model mid-run during early experiments, producing an
+uninterpretable comparison. All reported runs therefore pin a single model and
+record which model actually served each call. Every result below was produced
+entirely on the local model with no fallback.
+
+\subsection{Evaluation suites}
+\label{sec:eval-sets}
+
+\begin{table}[t]
+\caption{Evaluation suites and their roles}
+\label{tab:sets}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrp{4.0cm}@{}}
+\toprule
+Suite & Size & Role \\
+\midrule
+Benchmark & 2{,}000 & Reported results (200-question sample) \\
+Tuned     & 26 & Used during development; systematically optimistic \\
+Held-out  & 10 & Never used for tuning \\
+Safety    & 12 & Relation reversal, attribute mismatch, wrong time scope \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The safety suite \emph{deliberately includes three correctly-oriented positive
+controls}. Without them, a degenerate always-refuse system would score perfectly.
+We regard this as a necessary guard against self-deception rather than a
+formality.
+
+\subsection{Metrics}
+
+We report four groups: \emph{safety} (\texttt{false\_answer\_rate},
+\texttt{hallucinated\_answer\_rate}), \emph{coverage} (recall,
+\texttt{over\_abstention\_rate}), \emph{discrimination} (conditional precision,
+balanced accuracy), and \emph{grounding} (\texttt{grounding\_validity\_rate},
+\texttt{citation\_coverage}).
+
+Two metrics are easily conflated and have different denominators:
+\texttt{false\_answer\_rate} is computed over gold-unanswerable questions, whereas
+\texttt{hallucinated\_answer\_rate} is computed over questions the system chose to
+answer.
+
+%==============================================================================
+\section{Results}
+
+\subsection{Action distribution}
+
+\begin{table}[t]
+\caption{Action distribution over 200 questions (103 answerable / 97 unanswerable)}
+\label{tab:actions}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+System & \ACT{answer} & \ACT{abstain} & \ACT{ask} & Wrongly answered \\
+\midrule
+Basic RAG          & 83 & 117 & 0  & 39/97 \\
+Prompt-Safe RAG    & 72 & 128 & 0  & 31/97 \\
+\textbf{PonyGuard} & 44 & 130 & 26 & \textbf{13/97} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Main results}
+
+\begin{table}[t]
+\caption{Results on the frozen UIT-ViQuAD 2.0 test split (200-question sample)}
+\label{tab:main}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Metric & Basic & Prompt-Safe & \textbf{PonyGuard} \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Safety}}\\
+\texttt{false\_answer\_rate} $\downarrow$        & 0.402 & 0.320 & \textbf{0.134} \\
+\texttt{hallucinated\_answer\_rate} $\downarrow$ & 0.084 & \textbf{0.056} & 0.068 \\
+\texttt{unsupported\_claim\_rate} $\downarrow$   & 0.096 & \textbf{0.080} & 0.100 \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Discrimination}}\\
+Specificity $\uparrow$                & 0.598 & 0.680 & \textbf{0.866} \\
+Precision $\uparrow$                  & 0.530 & 0.569 & \textbf{0.705} \\
+Recall $\uparrow$                     & \textbf{0.427} & 0.398 & 0.301 \\
+Balanced accuracy $\uparrow$          & 0.513 & 0.539 & \textbf{0.583} \\
+\texttt{unanswerable\_f1} $\uparrow$  & 0.542 & 0.587 & \textbf{0.599} \\
+\texttt{answer\_f1} $\uparrow$        & 0.153 & \textbf{0.187} & 0.126 \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Grounding}}\\
+\texttt{grounding\_validity\_rate}    & 1.000 & 1.000 & 1.000 \\
+\texttt{citation\_coverage}           & 1.000 & 1.000 & 1.000 \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Cost}}\\
+LLM calls per question                & \textbf{2.17} & 2.27 & 4.03 \\
+Median latency (s)                    & 11.7 & \textbf{11.2} & 24.8 \\
+p95 latency (s)                       & \textbf{31.9} & 33.8 & 55.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:main} supports two observations.
+
+\textbf{First, instruction-level mitigation is of limited effect.} Prompt-Safe RAG
+lowers \texttt{false\_answer\_rate} from $0.402$ to $0.320$, but
+\texttt{over\_abstention\_rate} rises from $0.573$ to $0.602$. It trades $8$
+percentage points of wrong answers for $3$ percentage points of additional missed
+answers: the mechanism is increased conservatism, not improved discrimination.
+
+\textbf{Second, PonyGuard reduces \texttt{false\_answer\_rate} to $0.134$}, a
+two-thirds reduction relative to the baseline.
+
+\subsection{Discrimination versus threshold shifting}
+\label{sec:discrimination}
+
+The central objection to any abstention result is that the system may simply have
+become uniformly more conservative. Under that hypothesis, conditional precision
+would remain approximately constant while recall falls.
+
+The observed behaviour contradicts it: precision rises from $0.530$ to $0.705$, a
+$33\%$ relative increase, and balanced accuracy rises from $0.513$ to $0.583$.
+Both indicate movement \emph{off} the previous operating curve rather than along
+it. Prompt-Safe RAG, by contrast, raises precision only to $0.569$ while
+over-abstention increases --- the signature of threshold shifting.
+
+\subsection{Decomposition of lost recall}
+\label{sec:recall-decomp}
+
+PonyGuard fails to answer 72 answerable questions. We decompose the cause by
+testing whether the gold answer string appears anywhere in the retrieved context
+(Table~\ref{tab:decomp}).
+
+\begin{table}[t]
+\caption{Decomposition of the 72 answerable questions PonyGuard misses}
+\label{tab:decomp}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrp{3.2cm}@{}}
+\toprule
+Cause & Count & Interpretation \\
+\midrule
+Gold answer absent from context  & 34 & Retriever ceiling; shared by all systems \\
+Gold answer present in context   & 38 & Over-strict validation; attributable to PonyGuard \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Because all three systems share a retriever, the number of questions whose answer
+is present in context is essentially identical ($\approx 54/103$). Normalising by
+this ceiling gives Table~\ref{tab:ceiling}.
+
+\begin{table}[t]
+\caption{Answered questions relative to the retriever ceiling}
+\label{tab:ceiling}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\toprule
+System & Answered / present in context & Rate \\
+\midrule
+Basic RAG          & 44 / 54 & 81\% \\
+Prompt-Safe RAG    & 41 / 54 & 76\% \\
+PonyGuard          & 31 / 53 & 58\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This is the most diagnostically informative analysis in the study. Roughly half
+the lost recall is \emph{not} attributable to PonyGuard but to retrieval: the
+shared ceiling covers only about $52\%$ of answerable questions. The remainder
+($58\%$ versus the baseline's $81\%$) is the genuine cost of strict validation and
+constitutes a well-localised improvement target.
+
+%==============================================================================
+\section{Analysis}
+
+\subsection{Finding 1 --- A category error in relation verification}
+\label{sec:finding-category}
+
+For questions of the form \emph{``what is the difference between $A$ and $B$?''},
+the verification stage is asked whether the source states the \emph{difference}
+relation, and consistently answers that it does not.
+
+That answer is \textbf{logically correct}. No source states a \emph{derived}
+relation; if it did, the task would not be an inference. Posing that question to
+the verifier asks for a judgement that cannot come out otherwise, regardless of
+model capability.
+
+The concrete consequence was that a correctly implemented arithmetic validator
+was \emph{never executed}: the evidence had already been rejected upstream.
+
+The remedy is to replace composed-relation verification with (i)~verification of
+\emph{each operand} --- each of which \emph{is} explicitly stated in the source
+--- and (ii)~\emph{recomputation of the operation in code}. The result is
+\emph{stricter}, not weaker: four independent checks replace a single model
+judgement. We validated this on previously unseen data with the two operands
+drawn from two different chunks.
+
+\emph{Generalisation.} A verification stage is only useful when asked a
+proposition it can actually adjudicate. Applying a direct-verification criterion
+to a derived relation fails by construction, independently of model scale.
+
+\subsection{Finding 2 --- Referential ambiguity is observable only in the evidence}
+
+Questions such as \emph{``Thủ đô nằm ở đâu?''} (``Where is the capital?'') or
+\emph{``Dân số Hà Nội khi đó là bao nhiêu?''} (``What was Hanoi's population at
+that time?'') are syntactically complete. What they lack is referential
+determinacy.
+
+Direct inspection of the retrieved chunks shows a clear signal: for ambiguous
+questions, \emph{multiple} chunks answer the queried relation with \emph{different}
+values, distinguished by a dimension the question leaves unfixed. For the Hanoi
+population example the retrieved values are 53{,}000 (1954), 132{,}145 (1940s),
+and approximately 8 million (contemporary). For answerable questions,
+\emph{exactly one} chunk states the relation.
+
+The discriminating signal therefore exists and separates the two classes. This
+nevertheless constitutes an unresolved design tension: the \ACT{ask} decision must
+precede retrieval (Section~\ref{sec:intent}), whereas the signal only exists after
+it. Moreover, the current pipeline collapses multiple candidate answers into a
+single support before any decision point, destroying the signal before it can be
+consumed.
+
+\subsection{Finding 3 --- The failure class does not diminish with model scale}
+\label{sec:scaling}
+
+We measured the intent stage in isolation across three local models on an
+identical 36-question probe set (Table~\ref{tab:scaling}).
+
+\begin{table}[t]
+\caption{Intent-stage accuracy by model}
+\label{tab:scaling}
+\centering
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+Model & Score \\
+\midrule
+Qwen2.5-3B-Instruct-4bit & 23/36 \\
+Qwen2.5-7B-Instruct-4bit & 23/36 \\
+Qwen3-8B-MLX-4bit        & 29/36 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The 3B $\rightarrow$ 7B step is \emph{flat}; the 7B $\rightarrow$ 8B step is a
+generation change rather than a scale change. More informative than the aggregate:
+\textbf{five cases fail on all three models}. The score differences arise from
+other cases fluctuating, while this core remains invariant.
+
+The value of this measurement is that it separates \emph{architectural limits} ---
+addressable by design --- from \emph{capability limits} --- requiring a different
+model. The cases currently blocking the system fall into neither category
+cleanly, but they are demonstrably not resolved by increasing parameter count.
+
+\subsection{Finding 4 --- Quantitative evidence of overfitting in rule design}
+\label{sec:finding-overfit}
+
+During development we introduced two rules to handle observed failure cases. Both
+were written \emph{generically}, containing no entity names and no
+language-specific patterns, and therefore satisfied our no-hard-coding constraint
+in form.
+
+We subsequently wrote \emph{falsifiers} --- fixtures designed specifically to
+refute the specifications of those two rules. For instance, \emph{``Thủ đô của
+nước đó nằm ở đâu?''} (``Where is the capital of that country?'') is a
+location question whose jurisdiction is an unresolved reference, so the correct
+action is \ACT{ask}. Both rules suppressed this legitimate clarification.
+
+Removing the two rules produced the effect shown in Table~\ref{tab:overfit}.
+
+\begin{table}[t]
+\caption{Effect of removing the two unvalidated rules}
+\label{tab:overfit}
+\centering
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+Evaluation suite & Effect \\
+\midrule
+Tuned    & $-1$ case \\
+Held-out & unchanged \\
+Safety   & unchanged \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The entire value of both rules resided on the very dataset against which they had
+been designed, and was zero on unseen data.
+
+\emph{Methodological implication.} A no-hard-coding constraint is \textbf{necessary
+but not sufficient}. A generically phrased rule can still be a fixture fit if it
+was \emph{selected} by observing which cases it repairs. Sufficiency requires a
+held-out suite together with a mandatory falsifier for each rule.
+
+%==============================================================================
+\section{Limitations}
+\label{sec:limitations}
+
+We state the shortfalls explicitly.
+
+\begin{enumerate}
+  \item \textbf{Two wrong answers remain} on the independent test suites: an
+        inverted subject--object question is accepted (the case in
+        Section~\ref{sec:motivating}), and a question with an unresolved time
+        reference is answered. Both carry valid citations and verbatim quotes,
+        meaning they pass the entire validation chain of
+        Section~\ref{sec:code-checks}. The system \emph{does not meet its design
+        objective}.
+  \item \textbf{The relation-reversal leak rate is approximately $30\%$ and is
+        intermittent}: the same entity pair, differently phrased, is sometimes
+        blocked and sometimes not.
+  \item \textbf{Cost increases by roughly $1.9\times$} in model calls and
+        $2.1\times$ in median latency.
+  \item \textbf{Recall falls by $30\%$ relative} to the baseline; approximately
+        half is attributable to the retriever ceiling and half to strict
+        validation (Section~\ref{sec:recall-decomp}).
+  \item \textbf{Results are computed on a 200/2000 sample}, with an approximate
+        margin of $\pm 3.5$ percentage points. A full 2{,}000-question run
+        requires roughly 20 hours on local hardware.
+  \item \texttt{answer\_f1} \textbf{is lower than Prompt-Safe RAG} ($0.126$ versus
+        $0.187$). This partly reflects lower recall and partly a metric artefact:
+        PonyGuard emits terse verbatim quotes, which are penalised by token-level
+        F1 against freely phrased gold answers.
+  \item \textbf{The cross-provider capability comparison is incomplete} due to API
+        quota limits, so we cannot yet report whether a stronger model closes the
+        two remaining failures.
+\end{enumerate}
+
+%==============================================================================
+\section{Future Work}
+
+The intermittency of the relation-reversal leak
+(Section~\ref{sec:limitations}, item~2) suggests a direct remedy:
+\textbf{sample the judgement $k$ times and require unanimity}. If a failure occurs
+in $30\%$ of trials, requiring five-way agreement drives the leak rate down
+sharply, and the cost is incurred only on the branch about to answer.
+
+Three further directions follow from the analysis. First, converting the guards
+from fail-open to \textbf{fail-closed}, treated as a single measurable policy
+parameter rather than as scattered defaults, and reporting the resulting
+precision--recall curve. Second, \textbf{verifying from the answer side} rather
+than the source side: composing a complete proposition from the produced answer
+and asking whether the source entails it, since adjudicating one finished
+proposition is an easier task than extracting semantic roles from a passage ---
+an approach that two source-side attempts failed to make work. Third,
+\textbf{two-stage retrieval} (broad retrieval followed by reranking), motivated by
+the observation that the retriever ceiling of approximately $52\%$ upper-bounds
+every system in the comparison.
+
+%==============================================================================
+\section{Conclusion}
+
+We presented PonyGuard-ViQA, a Vietnamese question-answering architecture that
+relocates the answer-acceptance decision from the language model into
+deterministic validation code. On UIT-ViQuAD 2.0 the system reduces the rate of
+answering questions that should be refused from $0.402$ to $0.134$ while raising
+conditional precision from $0.530$ to $0.705$, indicating that the improvement
+derives from better discrimination rather than from increased conservatism. The
+cost is reduced recall and approximately $1.9\times$ compute.
+
+Beyond the quantitative result, we regard the methodological findings as the more
+transferable contribution: that verifying a derived relation with a
+direct-verification criterion is ill-posed; that a specific failure class does not
+diminish with model scale; and that a generically phrased rule can still
+constitute a fixture fit if it was selected by observing which cases it repairs.
+
+The system does not meet its design objective --- two wrong answers with valid
+citations remain on the independent test suites. We report this together with the
+localised cause and the intended remedy, rather than restricting the report to
+favourable results.
+
+%==============================================================================
+\section*{Author Contributions}
+
+This report was produced by \textbf{Group 3}. All five members participated in
+the weekly design reviews, in the failure-analysis sessions from which the four
+findings in Section~VII emerged, and in the writing of this report. Primary
+areas of responsibility were divided as follows.
+
+\begin{table}[h]
+\caption{Division of responsibility}
+\label{tab:contrib}
+\centering
+\footnotesize
+\begin{tabular}{@{}lp{4.7cm}@{}}
+\toprule
+Member & Primary responsibility \\
+\midrule
+\textbf{Ngo Anh Duc}
+  & Problem formulation and motivation; the three-way action taxonomy of
+    Section~II; asymmetric error-cost analysis; curation of the motivating
+    failure case. \\[2pt]
+\textbf{Pham Ngoc Hoa}
+  & Experimental design; the controlled three-system comparison; dataset
+    preparation, frozen-split hashing, and retrieval configuration; the
+    no-hard-coding constraint and its enforcement. \\[2pt]
+\textbf{Trinh Duc Duong}
+  & Pipeline architecture and implementation; the intent contract and its
+    deterministic span validation; the seven-step validation chain and
+    answer-plan locking; the inference proof path and direction check. \\[2pt]
+\textbf{Do Quang Hiep}
+  & Evaluation methodology; design of the tuned / held-out / safety suites and
+    their positive controls; falsifier construction; the category-error and
+    overfitting findings (Sections~VII-A and~VII-D). \\[2pt]
+\textbf{To Thanh Hai}
+  & Benchmark execution and metric implementation; the discrimination analysis
+    of Section~VI-C and the recall decomposition of Section~VI-D; the
+    model-scale study (Section~VII-C); limitations and future work. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We note that the boundaries above are approximate. Several results reported here
+--- in particular the two remaining safety failures documented in
+Section~VIII --- were identified collaboratively during joint review rather than
+by any single member.
+
+%==============================================================================
+\section*{Reproducibility}
+
+All source code, versioned prompt contracts, configuration, and test suites are
+contained in the project repository. Each run records the prompt versions, the
+pinned model, and the provider that actually served every call, so results are
+traceable. The test suite comprises 136 deterministic tests using scripted models,
+which validate contracts rather than model competence.
+
+To reproduce the main results:
+
+\begin{lstlisting}[style=contract]
+make test && make behavior-test
+python scripts/evaluate_all.py --limit 200 --model local
+\end{lstlisting}
+
+%==============================================================================
+\begin{thebibliography}{00}
+
+\bibitem{viquad} K.~V. Nguyen \emph{et al.}, ``A Vietnamese dataset for
+evaluating machine reading comprehension,'' in \emph{Proc. COLING}, 2020.
+
+\bibitem{e5} L.~Wang \emph{et al.}, ``Multilingual E5 text embeddings,''
+\emph{arXiv preprint arXiv:2402.05672}, 2024.
+
+\bibitem{faiss} J.~Johnson, M.~Douze, and H.~J\'egou, ``Billion-scale similarity
+search with GPUs,'' \emph{IEEE Trans. Big Data}, vol.~7, no.~3, pp.~535--547,
+2021.
+
+\bibitem{rag} P.~Lewis \emph{et al.}, ``Retrieval-augmented generation for
+knowledge-intensive NLP tasks,'' in \emph{Proc. NeurIPS}, 2020.
+
+\bibitem{selective} Y.~Geifman and R.~El-Yaniv, ``Selective classification for
+deep neural networks,'' in \emph{Proc. NeurIPS}, 2017.
+
+\bibitem{attribution} B.~Bohnet \emph{et al.}, ``Attributed question answering:
+Evaluation and modeling for attributed large language models,'' \emph{arXiv
+preprint arXiv:2212.08037}, 2022.
+
+\bibitem{ambigqa} S.~Min, J.~Michael, H.~Hajishirzi, and L.~Zettlemoyer,
+``AmbigQA: Answering ambiguous open-domain questions,'' in \emph{Proc. EMNLP},
+2020.
+
+\bibitem{qwen} Qwen Team, ``Qwen3 technical report,'' \emph{arXiv preprint},
+2025.
+
+\end{thebibliography}
+
+\end{document}

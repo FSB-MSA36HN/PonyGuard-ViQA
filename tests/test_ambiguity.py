@@ -275,3 +275,17 @@ def test_clarification_writer_rejects_an_incomplete_unanchored_question():
     requirement = Requirement(entity="an entity", missing_requirements=["requested_attribute"])
     question, response = PonyGuard(None, LLM()).refine_clarification("An entity has how many?", requirement, "", {})
     assert response is not None and question == ""
+
+
+def test_option_already_stated_in_the_question_cancels_the_allegation():
+    """A contract offering a choice the question already made is contradicting itself."""
+    requirement = Requirement(missing_requirements=["entity"], clarification_options=["Weil der Stadt", "Berlin"], clarification_question="Thành phố nào?")
+    guarded = PonyGuard.apply_clarity_guard("Dân số thành phố Weil der Stadt là bao nhiêu?", requirement)
+    assert guarded.missing_requirements == []
+    assert guarded.question_clear is True
+
+
+def test_option_absent_from_the_question_keeps_the_allegation():
+    requirement = Requirement(missing_requirements=["entity"], clarification_options=["Kepler", "Newton"], clarification_question="Bạn hỏi về ai?")
+    guarded = PonyGuard.apply_clarity_guard("Ông ấy sinh năm nào?", requirement)
+    assert guarded.missing_requirements == ["entity"]

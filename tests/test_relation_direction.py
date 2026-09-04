@@ -21,6 +21,19 @@ def triple_llm(question_subject, source_subject, source_object):
     return LLM()
 
 
+def test_an_identity_question_is_not_a_role_swap():
+    """The Italy case: "what is the capital of X?" puts the queried term on the
+    source's object side because the relation is symmetric, and the answer is the
+    source's subject. Rejecting that is a false positive."""
+    support = {"chunk_id": "d_1", "support_type": "DIRECT",
+               "evidence_quote": "Với vai trò là thủ đô của nước Ý, Roma là trụ sở của các tổ chức.",
+               "candidate_answer": "Roma", "premise_status": "SUPPORTED",
+               "relation_match": True, "attribute_match": True}
+    llm = triple_llm("Thủ đô của nước Ý", "Roma", "thủ đô của nước Ý")
+    aligned, _ = PonyGuard(None, llm).direction_matches("Thủ đô của nước Ý là gì?", support, {})
+    assert aligned is True
+
+
 def test_a_swapped_role_is_detected():
     llm = triple_llm("Tập đoàn Lend Lease", "Làng Olympic", "tập đoàn Lend Lease")
     aligned, _ = PonyGuard(None, llm).direction_matches("Tập đoàn Lend Lease được xây dựng ở đâu?", SUPPORT, {})
@@ -71,3 +84,27 @@ def test_a_reversed_support_turns_a_would_be_answer_into_abstain():
     )
     assert result["prediction"]["decision"] == "ABSTAIN"
     assert any("Hướng quan hệ" in r for r in result["trace"]["evidence"]["support_rejections"])
+
+
+def test_fallback_skips_an_unavailable_provider_for_the_rest_of_the_question():
+    """One timeout per question, not one per stage."""
+    from ponyguard_viqa.llm import FallbackLLM, ProviderQuotaError
+
+    class Primary:
+        model_name, max_tokens = "remote", 128
+        def __init__(self): self.attempts = 0
+        def generate(self, *_):
+            self.attempts += 1
+            raise ProviderQuotaError("Provider temporarily unavailable (429)")
+
+    class Local:
+        def generate(self, *_): return LLMResponse("local", 1, 1, 1)
+
+    primary = Primary()
+    llm = FallbackLLM(primary, Local())
+    for _ in range(4):
+        assert llm.generate("x").text == "local"
+    assert primary.attempts == 1, "provider should be retried once, not once per stage"
+    assert "429" in llm.generate("x").fallback_reason
+
+

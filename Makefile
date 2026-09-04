@@ -30,5 +30,14 @@ live-safety:
 	.venv/bin/python scripts/report_live_diagnostics.py --fixture data/diagnostics/ponyguard_safety_holdout.jsonl --predictions runs/ponyguard/ponyguard_safety_holdout_predictions.jsonl --output reports/PONYGUARD_SAFETY_HOLDOUT_REPORT.md
 demo:
 	.venv/bin/streamlit run src/ui/app.py --server.fileWatcherType none
+api:
+	.venv/bin/python src/api/server.py $(if $(PORT),$(PORT),8000)
+web-install:
+	cd web && npm install
+web-dev:
+	cd web && npm run dev
+web-build:
+	cd web && npm run build
 help:
 	@echo "make setup | dataset | verify-data | prepare-data | build-index | evaluate-retrieval | benchmark | test | behavior-test | live-behavioral | live-holdout | live-safety | demo"
+	@echo "React UI: make api (backend :8000) + make web-dev (Vite :5173) — or make web-build then make api để chạy 1 cổng"

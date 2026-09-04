@@ -89,7 +89,8 @@ def test_component_counts_produce_a_grounded_abstain_explanation_not_a_fake_tota
     evidence = {"chunk_id": "counts", "evidence_quote": "Subject has 8 mammals", "candidate_answer": "8", "valid_supports": []}
     observations = PonyGuard.validated_observations(evidence, [source])
     refusal = PonyGuard.grounded_refusal(Requirement(entity="subject", requested_attribute="total count"), {"valid_supports": [], "valid_observations": observations})
-    assert "nhiều số liệu riêng" in refusal["text"]
+    # The reason names what this question asked for, not a fixed phrase about numbers.
+    assert "total count của subject" in refusal["text"]
     assert "8 mammals" in refusal["text"]
 
 

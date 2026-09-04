@@ -230,8 +230,8 @@ def test_a_resolved_sibling_of_a_different_answer_type_does_not_cover_the_allega
     assert requirement.missing_requirements == ["location"]
 
 
-def test_intent_first_path_spends_no_call_on_a_question_only_audit():
-    """S0: intent owns ASK on its own path, so the question-only audit is redundant."""
+def test_intent_first_path_audits_clarification_when_no_evidence_survives():
+    """S0: intent cannot see a slot that only the retrieved sources show is ambiguous."""
     from ponyguard_viqa.core import Chunk
 
     class Retriever:
@@ -250,6 +250,32 @@ def test_intent_first_path_spends_no_call_on_a_question_only_audit():
     result = PonyGuard(Retriever(), llm, intent_first=True).run(
         {"sample_id": "no-audit", "question": "Một thực thể có thuộc tính gì?", "gold_answers": [], "expected_action": "ABSTAIN"}
     )
+    # The adjudicator ran, found no missing slot, and the refusal stands.
     assert result["prediction"]["decision"] == "ABSTAIN"
-    assert "clarification_adjudication" not in result["performance"]["stages"]
+    assert "clarification_adjudication" in result["performance"]["stages"]
     assert not any("clarity_auditor" in p or "Audit only whether" in p for p in llm.prompts)
+
+
+def test_evidence_backed_audit_turns_a_bare_refusal_into_a_question():
+    """An adjudicator may return one slot as a string; that must still ask."""
+    from ponyguard_viqa.core import Chunk
+
+    class Retriever:
+        last_timing = {}
+        def retrieve(self, *_): return [Chunk("d", "d_1", "Kepler sinh năm 1571. Newton sinh năm 1643.")]
+
+    class LLM:
+        def json(self, request, *_):
+            if "decision (ASK|ABSTAIN)" in request:
+                return {"decision": "ASK", "missing_requirements": "entity", "rationale": "Nhiều người trong nguồn.",
+                        "clarification_question": "", "clarification_options": ["Kepler", "Newton"]}, LLMResponse("{}", 1, 1, 1)
+            return {"entity": "ông ấy", "requested_attribute": "năm sinh", "answer_type": "TIME",
+                    "question_complete": True, "missing_requirements": [], "support": []}, LLMResponse("{}", 1, 1, 1)
+        def generate(self, *_): return LLMResponse("", 1, 1, 1)
+
+    result = PonyGuard(Retriever(), LLM(), intent_first=True).run(
+        {"sample_id": "audit-ask", "question": "Ông ấy sinh năm nào?", "gold_answers": [], "expected_action": "ASK"}
+    )
+    assert result["prediction"]["decision"] == "ASK"
+    assert result["trace"]["requirements"]["missing_requirements"] == ["entity"]
+    assert "đối tượng được hỏi" in result["prediction"]["reason"]

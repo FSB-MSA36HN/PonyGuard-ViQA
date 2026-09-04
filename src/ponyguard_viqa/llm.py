@@ -165,7 +165,9 @@ class GeminiLLM(LocalLLM):
             method="POST",
         )
         try:
-            with urlopen(request, timeout=90) as response:
+            # A staged pipeline makes several calls per question, so a long
+            # per-call timeout multiplies into minutes of user-visible wait.
+            with urlopen(request, timeout=20) as response:
                 payload = json.loads(response.read())
         except HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
@@ -186,18 +188,36 @@ class GeminiLLM(LocalLLM):
 
 
 class FallbackLLM(LocalLLM):
-    """Use local MLX when Gemini has temporary capacity or network trouble."""
+    """Use local MLX when Gemini has temporary capacity or network trouble.
+
+    A question costs several staged calls, so retrying an unavailable provider on
+    every one of them multiplies the timeout by the number of stages. After a
+    failure the primary is skipped for a cooldown window and retried once it
+    elapses; the reason stays visible in every response for reporting.
+    """
+    COOLDOWN_SECONDS = 120.0
+
     def __init__(self, primary: GeminiLLM, fallback: LocalLLM):
         self.primary, self.fallback = primary, fallback
         self.model_name, self.backend, self.max_tokens = primary.model_name, "gemini_auto", primary.max_tokens
+        self._blocked_until = 0.0
+        self._blocked_reason = ""
+
+    def _use_fallback(self, prompt: str, max_tokens: int | None, reason: str) -> LLMResponse:
+        response = self.fallback.generate(prompt, max_tokens)
+        response.fallback_reason = reason
+        return response
 
     def generate(self, prompt: str, max_tokens: int | None = None) -> LLMResponse:
+        now = perf_counter()
+        if now < self._blocked_until:
+            return self._use_fallback(prompt, max_tokens, f"{self._blocked_reason} (provider tạm ngưng {self._blocked_until - now:.0f}s)")
         try:
             return self.primary.generate(prompt, max_tokens)
         except ProviderQuotaError as error:
-            response = self.fallback.generate(prompt, max_tokens)
-            response.fallback_reason = str(error)
-            return response
+            self._blocked_until = perf_counter() + self.COOLDOWN_SECONDS
+            self._blocked_reason = str(error)
+            return self._use_fallback(prompt, max_tokens, str(error))
 
 
 def build_llm(model_config: dict[str, Any], *, mock: bool = False, selected_model: str | None = None) -> LocalLLM:

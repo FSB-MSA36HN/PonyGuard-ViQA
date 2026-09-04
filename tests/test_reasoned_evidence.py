@@ -65,9 +65,11 @@ def test_rejected_numeric_support_is_shown_as_a_component_not_a_total():
     chunk = Chunk("counts", "counts_1", "Country A has 3 groups, 12 birds, and 8 mammals.")
     evidence = {"chunk_id": chunk.chunk_id, "evidence_quote": "Country A has 8 mammals", "candidate_answer": "8", "valid_supports": []}
     observations = PonyGuard.validated_observations(evidence, [chunk])
-    refusal = PonyGuard.grounded_refusal(Requirement(), {"valid_supports": [], "valid_observations": observations})
+    requirement = Requirement(entity="Country A", requested_attribute="tổng số loài")
+    refusal = PonyGuard.grounded_refusal(requirement, {"valid_supports": [], "valid_observations": observations})
     assert "8 mammals" in refusal["text"]
-    assert "nhiều số liệu riêng" in refusal["text"]
+    # The limitation is derived from the question's own slots, never a stock sentence.
+    assert "tổng số loài của Country A" in refusal["text"]
 
 
 def test_refusal_shows_literal_retrieved_observations_when_no_answer_support_exists():
