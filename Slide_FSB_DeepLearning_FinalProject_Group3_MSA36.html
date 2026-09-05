@@ -229,6 +229,19 @@
             white-space: nowrap;
         }
         .pipe-exit.err { color: #c0392b; background: #fadbd8; }
+
+        /* This slide has five technical stages; keep its content inside one 16:9 frame. */
+        .pipeline-slide h2 { font-size: 1.75em; margin: 0 0 18px; }
+        .pipeline-slide .flex-container { margin-top: 0; gap: 28px; align-items: stretch; }
+        .pipeline-slide .pipe { padding: 10px 14px; margin-bottom: 9px; gap: 12px; }
+        .pipeline-slide .pipe > div { font-size: 0.64em; line-height: 1.35; }
+        .pipeline-slide .pipe-n { flex-basis: 30px; width: 30px; height: 30px; font-size: 0.68em; }
+        .pipeline-slide .pipe-fn { margin-top: 2px; font-size: 0.76em; }
+        .pipeline-slide .pipe-exit { font-size: 0.54em; }
+        .pipeline-slide .box { padding: 22px; }
+        .pipeline-slide .box h3 { font-size: 1.08em; margin-bottom: 12px; }
+        .pipeline-slide .box p { font-size: 0.68em; line-height: 1.38; margin: 0 0 18px; }
+        .pipeline-slide .box p:last-child { margin-bottom: 0; }
     </style>
 </head>
 <body>
@@ -388,15 +401,15 @@ else:
             </section>
 
             <!-- Slide 3.2: Chi tiết Pipeline -->
-            <section>
+            <section class="pipeline-slide">
                 <h2>Pipeline Xác minh — 5 Tầng</h2>
 
-                <div class="flex-container" style="margin-top: 20px; gap: 30px;">
+                <div class="flex-container">
                     <div class="col" style="flex: 1.25;">
                         <div class="pipe fragment">
                             <span class="pipe-n">1</span>
-                            <div><strong>Phân tích Intent</strong> — <em>chạy TRƯỚC khi retrieve</em>
-                            <br><span class="pipe-sub">Model khai từng slot + span copy nguyên văn từ câu hỏi + nhãn RESOLVED / REFERENTIAL / ABSENT. Code kiểm tra span có thật trong câu hỏi và <strong>tự tính</strong> kết luận.</span>
+                            <div><strong>Phân tích Intent</strong> — <em>trước khi retrieve</em>
+                            <br><span class="pipe-sub">Model xác định thông tin cần có; code kiểm tra các span có thật trong câu hỏi.</span>
                             <br><span class="pipe-fn">analyze_intent() · core.intent_slot_bindings()</span></div>
                             <span class="pipe-exit">thiếu slot → ASK</span>
                         </div>
@@ -404,49 +417,39 @@ else:
                         <div class="pipe fragment">
                             <span class="pipe-n">2</span>
                             <div><strong>Retrieve + Trích xuất bằng chứng</strong>
-                            <br><span class="pipe-sub">FAISS top-k=5. Mỗi bằng chứng bắt buộc kèm quote <strong>nguyên văn</strong>, đáp án ứng viên, loại DIRECT / SIMPLE_INFERENCE.</span>
+                            <br><span class="pipe-sub">FAISS top-k=5. Mỗi bằng chứng có quote nguyên văn, đáp án ứng viên và loại bằng chứng.</span>
                             <br><span class="pipe-fn">extract_facts() · prompts/fact_extractor_v1.txt</span></div>
                         </div>
 
                         <div class="pipe fragment">
                             <span class="pipe-n">3</span>
                             <div><strong>Verify quan hệ</strong>
-                            <br><span class="pipe-sub">Ba nhãn: <code>MATCH</code> / <code>CONTRADICTED</code> / <code>UNSTATED</code>. Chỉ MATCH mới cho qua bằng chứng DIRECT.</span>
+                            <br><span class="pipe-sub">Kiểm tra quan hệ trong câu hỏi có khớp với quan hệ nguồn hay không.</span>
                             <br><span class="pipe-fn">verify_relations() · prompts/relation_verifier_v1.txt</span></div>
                         </div>
 
                         <div class="pipe fragment" style="border-left-color:#27ae60;">
                             <span class="pipe-n" style="background:#27ae60;">4</span>
-                            <div><strong>Kiểm tra bằng code — 7 bước tuần tự</strong>
-                            <br><span class="pipe-sub">Chunk tồn tại → quote nguyên văn → tiền đề đúng → quan hệ/thuộc tính khớp → đáp án nằm trong quote → entity khớp cả hai phía → không lặp lại câu hỏi.</span>
+                            <div><strong>Kiểm tra bằng code</strong>
+                            <br><span class="pipe-sub">Kiểm tra chunk, quote, tiền đề, quan hệ, đáp án và thực thể trước khi chấp nhận.</span>
                             <br><span class="pipe-fn">validated_supports()</span></div>
                             <span class="pipe-exit err">fail bất kỳ bước → ABSTAIN</span>
                         </div>
 
-                        <div class="pipe fragment" style="border-left-color:#8e44ad;">
-                            <span class="pipe-n" style="background:#8e44ad;">5</span>
-                            <div><strong>Hai nhánh chuyên biệt</strong>
-                            <br><span class="pipe-sub"><strong>5b</strong> — câu suy luận: bắt buộc 2 toán hạng có quote riêng, Python <strong>tính lại phép toán</strong>.
-                            <br><strong>5c</strong> — kiểm tra <strong>chiều quan hệ</strong>: chủ ngữ câu hỏi khớp tân ngữ nguồn hơn chủ ngữ nguồn ⇒ đảo vai ⇒ loại.</span>
-                            <br><span class="pipe-fn">inference_proof_is_valid() · direction_matches()</span></div>
-                        </div>
-
-                        <div class="fragment text-center" style="margin-top: 15px;">
-                            <span class="flow-arrow">↓</span>
-                            <div class="flow-box" style="border-color:#27ae60; background:#eafaf1; color:#1e8449;">Answer plan bị <strong>KHÓA</strong> → ANSWER</div>
-                        </div>
                     </div>
 
                     <div class="col fragment" style="flex: 0.75;">
                         <div class="box" style="text-align: left; background:#eaf2f8;">
-                            <h3 style="margin-bottom: 15px;">Hai điểm thiết kế</h3>
-                            <p style="font-size: 0.85em;"><strong>Vì sao Intent chạy trước retrieve?</strong><br>
+                            <h3>Tầng 5 và các điểm thiết kế</h3>
+                            <p><strong>5b — Câu suy luận:</strong><br>
+                            Hai toán hạng phải có quote riêng; Python tính lại kết quả.</p>
+                            <p><strong>5c — Chiều quan hệ:</strong><br>
+                            Nếu vai trò chủ thể trong câu hỏi bị đảo với nguồn, hệ loại bằng chứng.</p>
+                            <p><strong>Vì sao Intent chạy trước retrieve?</strong><br>
                             Nếu để sau, hệ thống sẽ hỏi lại chỉ vì không tìm thấy bằng chứng — mà đó là lý do để <strong>từ chối</strong>, không phải để hỏi.</p>
-                            <p style="font-size: 0.85em;"><strong>Vì sao khóa answer plan?</strong><br>
+                            <p><strong>Vì sao khóa answer plan?</strong><br>
                             Qua đủ 7 bước thì bộ ba đáp án – quote – citation <strong>bất biến</strong>. Tầng viết câu chữ chỉ được diễn đạt lại, không được thay.</p>
-                        </div>
-                        <div class="box" style="text-align: left; margin-top: 25px;">
-                            <p style="font-size: 0.85em; margin: 0;"><strong>LLM</strong> chỉ xuất hiện ở tầng 1, 2, 3 và 5c — luôn ở vai <em>đề xuất</em>.<br>
+                            <p><strong>LLM</strong> chỉ xuất hiện ở tầng 1, 2, 3 và 5c — luôn ở vai <em>đề xuất</em>.<br>
                             <strong>Quyết định chấp nhận</strong> nằm trọn ở tầng 4 và 5b, hoàn toàn bằng code.</p>
                         </div>
                     </div>
